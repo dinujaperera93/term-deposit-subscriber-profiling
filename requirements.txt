@@ -1,0 +1,9 @@
+# Packages to install
+pandas
+numpy
+matplotlib
+seaborn
+scikit-learn
+lazypredict
+hyperopt
+jupytext
