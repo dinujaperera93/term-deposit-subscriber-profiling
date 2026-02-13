@@ -1,6 +1,5 @@
 import warnings
 warnings.filterwarnings("ignore")
-
 from pathlib import Path
 import random
 from src.model import (load_data, explore_data, split_data, EDA, data_cleaning, 
