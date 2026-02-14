@@ -1,7 +1,3 @@
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
-figures/
-data/
-*.csv
-.env

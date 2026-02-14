@@ -8,7 +8,8 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import recall_score, make_scorer, classification_report, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier, StackingClassifier
-from sklearn.svm import SVC
+from sklearn.svm import LinearSVC
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 from lightgbm import LGBMClassifier
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
@@ -79,6 +80,7 @@ def EDA(X_train, y_train, X_val, y_val, categorical_df, numeric_df):
     print("\nCategorical Value Counts (Train + Val)\n")
     for col in cat_cols:
         categorical_counts(df_tv[col].value_counts())
+        print(" ")
         
     for col in cat_cols:
         plt.figure()
@@ -186,7 +188,7 @@ def select_model(X_train, X_val, y_train, y_val):
     print(f"\nBest model for minority class: {models['minority_recall'].idxmax()}")
     return models, predictions
 
-def compare_ensembles(X_train, y_train, X_val, y_val, seed, cv=5):
+def compare_ensembles(X_train, y_train, X_val, y_val, seed, cv=3):
     minority_recall = make_scorer(recall_score, pos_label=1)
     
     # Combine train and val for cross-validation
@@ -196,13 +198,12 @@ def compare_ensembles(X_train, y_train, X_val, y_val, seed, cv=5):
     models = {
         "KNN": KNeighborsClassifier(n_neighbors=7),
         "Random Forest": RandomForestClassifier(random_state=seed, class_weight="balanced"),
-        "LGBM": LGBMClassifier(random_state=seed, verbose=-1, class_weight="balanced"),
-        "SVM": SVC(random_state=seed, class_weight="balanced", probability=True),
+        "LGBM": LGBMClassifier(random_state=seed, verbose=-1, class_weight="balanced")
     }
 
     base = [(k.lower().replace(" ", "_"), v) for k, v in models.items()]
     models["Voting"] = VotingClassifier(estimators=base, voting="soft")
-    models["Stacking"] = StackingClassifier(estimators=base, final_estimator=LogisticRegression(max_iter=2000), cv=5)
+    models["Stacking"] = StackingClassifier(estimators=base, final_estimator=LogisticRegression(max_iter=2000), cv=3)
     
     results = []
     fitted_models = {}
@@ -256,12 +257,12 @@ def tune_hyperparameters(X_train, y_train, X_val, y_val, seed):
             'colsample_bytree': params['colsample_bytree'],
         }
         model = LGBMClassifier(**params, random_state=seed, verbose=-1, class_weight='balanced')
-        score = cross_val_score(model, X_combined, y_combined, cv=5, scoring=minority_recall).mean()
+        score = cross_val_score(model, X_combined, y_combined, cv=3, scoring=minority_recall).mean()
         return {'loss': -score, 'status': STATUS_OK}
 
     trials = Trials()
     rstate = np.random.default_rng(seed)
-    best = fmin(fn=objective, space=space, algo=tpe.suggest, max_evals=50, trials=trials, rstate=rstate)
+    best = fmin(fn=objective, space=space, algo=tpe.suggest, max_evals=20, trials=trials, rstate=rstate)
     
     best_params = {
         'n_estimators': int(best['n_estimators']),
