@@ -16,6 +16,7 @@ import numpy as np
 
 FIGURES_DIR = Path(__file__).resolve().parent.parent / "figures"
 FIGURES_DIR.mkdir(exist_ok=True)
+
 def load_data(filepath):
     return pd.read_csv(filepath)
 
@@ -29,13 +30,13 @@ def explore_data(df):
     print(f"Columns of the dataset : {df.columns}")
     print("Number of records in the dataframe; {}\nNumber of duplicate records: {}".format(df.shape[0],df.duplicated().sum()))
     df.info()
-    numeric_cols = df.select_dtypes(include=["int64", "float64"])
-    categorical_cols = df.select_dtypes(include=["object"])
+    numeric_df = df.select_dtypes(include=["int64", "float64"])
+    categorical_df = df.select_dtypes(include=["object"])
     
     print("\nNumerical Features Summary:\n")
-    print(numeric_cols.describe())
+    print(numeric_df.describe())
     print("\nCategorical Features Summary:\n")
-    print(categorical_cols.describe())
+    print(categorical_df.describe())
     
     plt.figure()
     ax = sns.countplot(x=df["y"])
@@ -50,9 +51,10 @@ def explore_data(df):
     plt.ylabel("Count")
     plt.grid(True)
     plt.savefig(FIGURES_DIR / "target_distribution.png", bbox_inches="tight")
+    plt.show()
     plt.close()
     
-    return numeric_cols, categorical_cols
+    return numeric_df, categorical_df
     
 def split_data(df, target, seed, test_size=0.2, val_size = 0.2):
     X = df.loc[:, df.columns != target]
@@ -64,10 +66,10 @@ def split_data(df, target, seed, test_size=0.2, val_size = 0.2):
 
     return X_train, X_val, X_test, y_train, y_val, y_test
     
-def EDA(X_train, y_train, X_val, y_val, categorical_cols, numeric_cols):
+def EDA(X_train, y_train, X_val, y_val, categorical_df, numeric_df):
     
-    cat_cols = categorical_cols.columns.tolist()
-    num_cols = numeric_cols.columns.tolist()
+    cat_cols = categorical_df.columns.tolist()
+    num_cols = numeric_df.columns.tolist()
     # Combine train + val
     X_tv = pd.concat([X_train, X_val], axis=0).reset_index(drop=True)
     y_tv = pd.Series(list(y_train) + list(y_val), name="y")
@@ -86,6 +88,7 @@ def EDA(X_train, y_train, X_val, y_val, categorical_cols, numeric_cols):
         plt.xticks(rotation=45)
         plt.grid(True)
         plt.savefig(FIGURES_DIR / f"feature_{col}.png", bbox_inches='tight') 
+        plt.show()
         plt.close()
 
     corr = df_tv[num_cols].corr()
@@ -94,6 +97,7 @@ def EDA(X_train, y_train, X_val, y_val, categorical_cols, numeric_cols):
     plt.title("Correlation Heatmap (Train + Val)")
     plt.tight_layout()
     plt.savefig(FIGURES_DIR / "corr_heatmap_train_val.png", bbox_inches="tight")
+    plt.show()
     plt.close()
 
     for col in num_cols:
@@ -116,34 +120,42 @@ def EDA(X_train, y_train, X_val, y_val, categorical_cols, numeric_cols):
 
         plt.tight_layout()
         plt.savefig(FIGURES_DIR / f"hist_{col}.png", bbox_inches="tight")
+        plt.show()
         plt.close()
     
     return df_tv
     
-def data_cleaning(df, categorical_cols, numeric_cols):
+def data_cleaning(df, categorical_df, numeric_df):
     df = df.copy()
-    
-    for col in categorical_cols.columns:
+
+    # Store train-fitted parameters for test set
+    cat_mode = {}
+    num_bounds = {}  # {col: (lower, upper)}
+
+    for col in categorical_df.columns:
         df[col] = df[col].replace("unknown", pd.NA)
-        mode_value = df[col].mode()[0]
+        mode_value = df[col].mode(dropna=True)[0]
+        cat_mode[col] = mode_value
         df[col] = df[col].fillna(mode_value)
-    
-    for col in numeric_cols.columns:
+
+    for col in numeric_df.columns:
         Q1 = df[col].quantile(0.25)
         Q3 = df[col].quantile(0.75)
         IQR = Q3 - Q1
         lower = Q1 - 1.5 * IQR
         upper = Q3 + 1.5 * IQR
+        num_bounds[col] = (lower, upper)
         df[col] = df[col].clip(lower, upper)
-    
-    return df
 
-def encode_data(X_train, X_val, y_train, y_val, categorical_cols, numeric_cols):
+    return df, cat_mode, num_bounds
+
+
+def encode_data(X_train, X_val, y_train, y_val, categorical_df, numeric_df):
     X_train = X_train.copy()
     X_val = X_val.copy()
     
-    cat_cols = [c for c in categorical_cols.columns.tolist() if c != 'y']
-    num_cols = numeric_cols.columns.tolist()
+    cat_cols = [c for c in categorical_df.columns.tolist() if c != 'y']
+    num_cols = numeric_df.columns.tolist()
     
     le_dict = {}
     for col in cat_cols:
@@ -163,18 +175,23 @@ def encode_data(X_train, X_val, y_train, y_val, categorical_cols, numeric_cols):
     return X_train, X_val, y_train, y_val, le_dict, scaler, le_y
     
         
-def select_model(X_train, X_test, y_train, y_test):
+def select_model(X_train, X_val, y_train, y_val):
+    # Minority class is 1
     def minority_recall(y_true, y_pred):
-        return recall_score(y_true, y_pred, pos_label=0)
+        return recall_score(y_true, y_pred, pos_label=1)
 
     clf = LazyClassifier(verbose=0, ignore_warnings=True, custom_metric=minority_recall)
-    models, predictions = clf.fit(X_train, X_test, y_train, y_test)
+    models, predictions = clf.fit(X_train, X_val, y_train, y_val)
 
     print(f"\nBest model for minority class: {models['minority_recall'].idxmax()}")
     return models, predictions
 
 def compare_ensembles(X_train, y_train, X_val, y_val, seed, cv=5):
-    minority_recall = make_scorer(recall_score, pos_label=0)
+    minority_recall = make_scorer(recall_score, pos_label=1)
+    
+    # Combine train and val for cross-validation
+    X_combined = pd.concat([X_train, X_val], axis=0).reset_index(drop=True)
+    y_combined = np.concatenate([y_train, y_val])
     
     models = {
         "KNN": KNeighborsClassifier(n_neighbors=7),
@@ -191,8 +208,8 @@ def compare_ensembles(X_train, y_train, X_val, y_val, seed, cv=5):
     fitted_models = {}
     
     for name, model in models.items():
-        mrec = cross_val_score(model, X_train, y_train, cv=cv, scoring=minority_recall).mean()
-        model.fit(X_train, y_train)
+        mrec = cross_val_score(model, X_combined, y_combined, cv=cv, scoring=minority_recall).mean()
+        model.fit(X_combined, y_combined)
         fitted_models[name] = model
         results.append({"Model": name, "Minority_Recall": round(mrec, 4)})
     
@@ -205,13 +222,18 @@ def compare_ensembles(X_train, y_train, X_val, y_val, seed, cv=5):
     plt.ylabel("Minority Recall")
     plt.grid(True, axis='y')
     plt.savefig(FIGURES_DIR / "model_comparison.png", bbox_inches='tight')
+    plt.show()
     plt.close()
     
     return fitted_models, results_df
 
-def tune_hyperparameters(X_train, y_train, seed):
+def tune_hyperparameters(X_train, y_train, X_val, y_val, seed):
     np.random.seed(seed)
-    minority_recall = make_scorer(recall_score, pos_label=0)
+    minority_recall = make_scorer(recall_score, pos_label=1)
+    
+    # Combine train and val
+    X_combined = pd.concat([X_train, X_val], axis=0).reset_index(drop=True)
+    y_combined = np.concatenate([y_train, y_val])
 
     space = {
         'n_estimators': hp.quniform('n_estimators', 50, 500, 25),
@@ -234,7 +256,7 @@ def tune_hyperparameters(X_train, y_train, seed):
             'colsample_bytree': params['colsample_bytree'],
         }
         model = LGBMClassifier(**params, random_state=seed, verbose=-1, class_weight='balanced')
-        score = cross_val_score(model, X_train, y_train, cv=5, scoring=minority_recall).mean()
+        score = cross_val_score(model, X_combined, y_combined, cv=5, scoring=minority_recall).mean()
         return {'loss': -score, 'status': STATUS_OK}
 
     trials = Trials()
@@ -252,7 +274,7 @@ def tune_hyperparameters(X_train, y_train, seed):
     }
     
     best_model = LGBMClassifier(**best_params, random_state=seed, verbose=-1, class_weight='balanced')
-    best_model.fit(X_train, y_train)
+    best_model.fit(X_combined, y_combined)
     best_score = -min(t['result']['loss'] for t in trials.trials)
     
     print(f"Best Parameters: {best_params}")
@@ -275,18 +297,43 @@ def important_features(X_train, model):
     plt.ylabel("Feature")
     plt.tight_layout()
     plt.savefig(FIGURES_DIR / "feature_importance.png", bbox_inches='tight')
+    plt.show()
     plt.close()
     
     return feature_df
 
-def evaluate_model(model, X_test, y_test):
+
+def evaluate_model(model,X_test,y_test,categorical_df,numeric_df,cat_mode,num_bounds,le_dict,scaler,le_y):
+    X_test = X_test.copy()
+    cat_cols = [c for c in categorical_df.columns.tolist() if c != "y"]
+    num_cols = numeric_df.columns.tolist()
+
+    # Cleaning on X_test using train-fitted params
+    for col in cat_cols:
+        X_test[col] = X_test[col].replace("unknown", pd.NA)
+        X_test[col] = X_test[col].fillna(cat_mode[col])
+
+    for col in num_cols:
+        lower, upper = num_bounds[col]
+        X_test[col] = X_test[col].clip(lower, upper)
+
+    # Encoding categorical using train-fitted label encoders
+    for col in cat_cols:
+        X_test[col] = le_dict[col].transform(X_test[col])
+
+    # Scaling numeric using train-fitted scaler
+    X_test[num_cols] = scaler.transform(X_test[num_cols])
+
+    # Encode y_test
+    y_test_enc = le_y.transform(y_test)
     y_pred = model.predict(X_test)
-    cm = confusion_matrix(y_test, y_pred)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=model.classes_)
+
+    cm = confusion_matrix(y_test_enc, y_pred)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=le_y.classes_)
     disp.plot()
     plt.title("Confusion Matrix")
     plt.savefig(FIGURES_DIR / "confusion_matrix.png", bbox_inches="tight")
-    plt.show(block=False)
+    plt.show()
     plt.close()
-    clf_report = classification_report(y_test, y_pred)
+    clf_report = classification_report(y_test_enc, y_pred, target_names=le_y.classes_)
     return clf_report

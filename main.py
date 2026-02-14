@@ -14,27 +14,28 @@ def main():
     DATA_PATH = ROOT / "data" / "term-deposit-marketing-2020.csv"
     
     term_deposit_df = load_data(DATA_PATH)
-    numeric_cols, categorical_cols = explore_data(term_deposit_df)
-    
-    term_deposit_df = data_cleaning(term_deposit_df, categorical_cols, numeric_cols)
-    
+    numeric_df, categorical_df = explore_data(term_deposit_df)
+        
     X_train, X_val, X_test, y_train, y_val, y_test = split_data(term_deposit_df, target="y", seed=seed)
-    EDA(X_train, y_train, X_val, y_val, categorical_cols, numeric_cols)
+    df_tv = EDA(X_train, y_train, X_val, y_val, categorical_df, numeric_df)
     
-    X_train, X_val, y_train, y_val, le_dict, scaler, le_y= encode_data(X_train, X_val, y_train, y_val, categorical_cols, numeric_cols)
+    term_deposit_df, cat_mode, num_bounds = data_cleaning(df_tv, categorical_df, numeric_df)
+
+    X_train, X_val, y_train, y_val, le_dict, scaler, le_y= encode_data(X_train, X_val, y_train, y_val, categorical_df, numeric_df)
     
     models, predictions = select_model(X_train, X_val, y_train, y_val)
     print(models)
         
-    fitted_models, results_df = compare_ensembles(X_train, y_train, X_val, y_val, seed)
+    fitted_models, results_df = compare_ensembles(X_train, y_train, X_val, y_val, seed, cv=5)
     print(results_df)
 
-    best_model, best_params, best_score = tune_hyperparameters(X_train, y_train, seed)
+    best_model, best_params, best_score = tune_hyperparameters(X_train, y_train, X_val, y_val, seed)
 
     feature_df = important_features(X_train, best_model)
     print(feature_df)
 
-    clf_report = evaluate_model(best_model, X_val, y_val)
+    clf_report = evaluate_model(best_model, X_test, y_test, categorical_df,numeric_df,cat_mode,num_bounds,le_dict,scaler,le_y)
+    print(clf_report)
 
 if __name__ == "__main__":
     main()
