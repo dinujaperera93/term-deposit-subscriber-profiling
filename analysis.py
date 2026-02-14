@@ -13,13 +13,10 @@
 #     language: python
 #     name: python3
 # ---
-
 # %%
-# %matplotlib agg
-
 import warnings
 warnings.filterwarnings("ignore")
-
+import time
 from pathlib import Path
 import random
 
@@ -59,13 +56,19 @@ X_train, X_val, y_train, y_val, le_dict, scaler, le_y = encode_data(
 )
 
 # %%
+start_select = time.time()
 models, predictions = select_model(X_train, X_val, y_train, y_val)
+end_select = time.time()
 print(models)
+print(f"\nselect_model duration: {end_select - start_select:.2f} seconds")
 
 # %%
+start_ensemble = time.time()
 fitted_models, results_df = compare_ensembles(
     X_train, y_train, X_val, y_val, seed, cv=5
 )
+end_ensemble = time.time()
+print(f"\ncompare_ensembles duration: {end_ensemble - start_ensemble:.2f} seconds")
 print(results_df)
 
 # %%
