@@ -56,7 +56,10 @@ from pathlib import Path
 import random
 
 from src.two_layer_model import (
-    load_data, explore_data, train_two_layer_pipeline
+    load_data, get_feature_sets, explore_data,
+    split_data, data_cleaning, encode_data,
+    select_model, tune_hyperparameters,
+    feature_importance, evaluate_model
 )
 
 SEED = random.randint(1000, 9999)
@@ -76,7 +79,21 @@ term_deposit_df.head()
 
 # %% [markdown]
 # ---
-# ## 2. Exploratory Data Analysis
+# ## 2. Feature Groups
+#
+# Features are split into pre-call and post-call groups based on when they become available.
+# `duration` is in the post-call group — it only exists after a call ends and must not
+# be used in Model 1 (data leakage).
+
+# %%
+pre_call_cols, post_call_cols = get_feature_sets(term_deposit_df)
+all_cols = pre_call_cols + post_call_cols
+print(f"Model 1 — Pre-call  : {pre_call_cols}")
+print(f"Model 2 adds        : {post_call_cols}")
+
+# %% [markdown]
+# ---
+# ## 3. Exploratory Data Analysis
 #
 # EDA covers target distribution, feature distributions by class, numeric histograms,
 # correlation structure, and identification of structural missing values (`"unknown"`).
@@ -94,7 +111,7 @@ numeric_df, categorical_df = explore_data(term_deposit_df)
 # | No (did not subscribe) | 37104 | 92.8% |
 # | Yes (subscribed) | 2896 | 7.2% |
 #
-# The dataset is highly imbalanced. A majority-class classifier achieves 92% accuracy
+# The dataset is highly imbalanced. A majority-class classifier achieves 93% accuracy
 # while being useless to the business. This drives two decisions:
 # - **Metric:** Optimise for minority-class recall alongside the 81% accuracy target
 # - **Model config:** `class_weight='balanced'` to penalise missed subscribers
@@ -125,13 +142,13 @@ numeric_df, categorical_df = explore_data(term_deposit_df)
 # - **`contact`:** The majority of contacts were made via cellular. A substantial portion
 #   of records have an unknown contact type (see table below).
 # - **`month`:** May has the highest contact volume by a large margin. No calls were made
-#   in January or September, suggesting campaign scheduling constraints.
+#   in September, suggesting campaign scheduling constraints.
 #
 # ---
 #
 # #### Structural Missing Values ("unknown")
 #
-# Pandas reports zero nulls — missingness is encoded as the string `"unknown"`:
+# Pandas reports zero nulls but it is assumed that the missingness is encoded as the string `"unknown"`:
 #
 # | Column | Count | % of Dataset |
 # |--------|-------|-------------|
@@ -150,14 +167,13 @@ numeric_df, categorical_df = explore_data(term_deposit_df)
 # | Any one (union) | 13,705 (34.3%) |
 #
 # **Why rows were not dropped:**
-# Dropping any row containing "unknown" would remove 34.3% of the dataset — nearly all of it
+# Dropping any row containing "unknown" would remove 34.3% of the dataset, nearly all of it
 # driven by `contact` alone. Given the existing class imbalance, discarding that volume
 # would significantly reduce minority-class representation in training.
 #
 # **Design decision — hybrid imputation strategy:**
 # - **`contact`** → "unknown" retained as a valid category. At 31.9%, this is not random
-#   missingness but a distinct cohort (customers reached via an unlogged channel, or
-#   older records from before contact-type tracking was introduced). LabelEncoder assigns
+#   missingness but a distinct cohort (customers reached via an unlogged channel). LabelEncoder assigns
 #   it its own integer; LightGBM can learn from it.
 # - **`education` and `job`** → mode-imputed. Sparse unknowns (3.8% and 0.6%) with no
 #   evidence they form a meaningful segment. Mode imputation is simple and introduces
@@ -172,23 +188,43 @@ numeric_df, categorical_df = explore_data(term_deposit_df)
 
 # %% [markdown]
 # ---
-# ## 3. Preprocessing Pipeline
+# ## 4. Preprocessing Pipeline
 #
-# All transformations are **fitted on training data only** — no leakage at any stage.
+# All transformations are **fitted on training data only**; no leakage at any stage.
 #
 # | Step | Method | Rationale |
 # |------|--------|-----------|
-# | Train / Val / Test split | Stratified 80 / 10 / 10 | Preserves the 88/12 class ratio across all sets |
+# | Train / Val / Test split | Stratified 80 / 10 / 10 | Preserves the 93/7 class ratio across all sets |
 # | `contact` "unknown" | Kept as valid category | 31.9% — informative cohort, not random missingness |
 # | `education`, `job` "unknown" | Mode imputation | Sparse unknowns; mode fitted on train only |
 # | Outlier handling | IQR clipping | Reduces outlier influence without removing rows |
-# | Categorical encoding | `LabelEncoder` | Tree models handle label-encoded categories well |
-# | Numeric scaling | `StandardScaler` | Normalises feature scale |
+# | Categorical encoding | `LabelEncoder` | Converts string categories to integers; compatible with all sklearn estimators |
+# | Numeric scaling | `StandardScaler` | Features span mixed distributions (`balance`, `duration`, `campaign` are skewed; `age` near-normal; `day` uniform). After IQR clipping, extreme outliers are removed; StandardScaler centres and scales each feature to zero mean and unit variance without distortion |
 # | Target encoding | `LabelEncoder` | `no` → 0, `yes` → 1 |
 
 # %% [markdown]
+# ### Step 4.1 — Train / Validation / Test Split
+
+# %%
+X_train, X_val, X_test, y_train, y_val, y_test = split_data(
+    term_deposit_df, target="y", seed=SEED
+)
+
+# %% [markdown]
+# ### Step 4.2 — Data Cleaning
+#
+# Outlier clipping (IQR) fitted on train, applied to val.
+# Mode imputation for `education` and `job` only; `contact` "unknown" kept as-is.
+
+# %%
+X_train_cleaned, X_val_cleaned, cat_mode, num_bounds, cat_cols, num_cols = data_cleaning(
+    X_train, X_val, categorical_df, numeric_df
+)
+print("Mode values used for imputation:", cat_mode)
+
+# %% [markdown]
 # ---
-# ## 4. Model Selection
+# ## 5. Model Selection
 #
 # **LazyPredict** benchmarks 30+ classifiers in a single pass, ranked by minority-class
 # recall on the validation set.
@@ -204,7 +240,7 @@ numeric_df, categorical_df = explore_data(term_deposit_df)
 
 # %% [markdown]
 # ---
-# ## 5. Hyperparameter Tuning
+# ## 6. Hyperparameter Tuning
 #
 # **Hyperopt** with TPE (Tree-structured Parzen Estimator) performs Bayesian optimisation.
 # Objective: maximise average minority-class recall across 5-fold cross-validation.
@@ -224,40 +260,125 @@ numeric_df, categorical_df = explore_data(term_deposit_df)
 
 # %% [markdown]
 # ---
-# ## 6. Running the Full Two-Layer Pipeline
-#
-# `train_two_layer_pipeline` executes the complete sequence — split, clean, encode,
-# select, tune, and evaluate — independently for Model 1 (pre-call features) and
-# Model 2 (all features). Feature importance charts and confusion matrices are
-# saved to `figures/` and displayed inline below.
+# ## 7. Model 1 — Pre-Call Targeting
+# *Feature set: demographics + financial history only (no call data)*
+
+# %% [markdown]
+# ### Step 7.1 — Encode Features (Model 1)
 
 # %%
-results = train_two_layer_pipeline(term_deposit_df, SEED, categorical_df, numeric_df)
+pre_cat_cols = [c for c in pre_call_cols if c in cat_cols]
+pre_num_cols = [c for c in pre_call_cols if c in num_cols]
+
+X_tr_m1, X_va_m1, y_tr_enc, y_va_enc, le1, sc1, le_y1 = encode_data(
+    X_train_cleaned[pre_call_cols], X_val_cleaned[pre_call_cols],
+    y_train, y_val, pre_cat_cols, pre_num_cols
+)
+print(f"Model 1 training shape : {X_tr_m1.shape}")
+print(f"Features               : {X_tr_m1.columns.tolist()}")
+
+# %% [markdown]
+# ### Step 7.2 — Model Selection (Model 1)
+
+# %%
+models_df1, _ = select_model(X_tr_m1, X_va_m1, y_tr_enc, y_va_enc)
+print(models_df1)
+
+# %% [markdown]
+# ### Step 7.3 — Hyperparameter Tuning (Model 1)
+
+# %%
+model1, params1, score1 = tune_hyperparameters(X_tr_m1, y_tr_enc, X_va_m1, y_va_enc, SEED)
+
+# %% [markdown]
+# ### Step 7.4 — Feature Importance (Model 1)
+
+# %%
+feat1 = feature_importance(X_tr_m1, model1)
+print(feat1)
+
+# %% [markdown]
+# ### Step 7.5 — Evaluation on Test Set (Model 1)
+
+# %%
+report1 = evaluate_model(
+    model1, X_test[pre_call_cols].copy(), y_test,
+    le1, sc1, le_y1,
+    pre_cat_cols, pre_num_cols, cat_mode, num_bounds, pre_call_cols, "Model1"
+)
+print(report1)
 
 # %% [markdown]
 # ---
-# ## 7. Results
+# ## 8. Model 2 — Post-Call Follow-Up
+# *Feature set: all features including call data (`duration`, `contact`, `month`, `day`, `campaign`)*
+
+# %% [markdown]
+# ### Step 8.1 — Encode Features (Model 2)
 
 # %%
-m1 = results['model1']
-m2 = results['model2']
+all_cat_cols = [c for c in all_cols if c in cat_cols]
+all_num_cols = [c for c in all_cols if c in num_cols]
 
+X_tr_m2, X_va_m2, y_tr_enc2, y_va_enc2, le2, sc2, le_y2 = encode_data(
+    X_train_cleaned[all_cols], X_val_cleaned[all_cols],
+    y_train, y_val, all_cat_cols, all_num_cols
+)
+print(f"Model 2 training shape : {X_tr_m2.shape}")
+print(f"Features               : {X_tr_m2.columns.tolist()}")
+
+# %% [markdown]
+# ### Step 8.2 — Model Selection (Model 2)
+
+# %%
+models_df2, _ = select_model(X_tr_m2, X_va_m2, y_tr_enc2, y_va_enc2)
+print(models_df2)
+
+# %% [markdown]
+# ### Step 8.3 — Hyperparameter Tuning (Model 2)
+
+# %%
+model2, params2, score2 = tune_hyperparameters(X_tr_m2, y_tr_enc2, X_va_m2, y_va_enc2, SEED)
+
+# %% [markdown]
+# ### Step 8.4 — Feature Importance (Model 2)
+
+# %%
+feat2 = feature_importance(X_tr_m2, model2)
+print(feat2)
+
+# %% [markdown]
+# ### Step 8.5 — Evaluation on Test Set (Model 2)
+
+# %%
+report2 = evaluate_model(
+    model2, X_test[all_cols].copy(), y_test,
+    le2, sc2, le_y2,
+    all_cat_cols, all_num_cols, cat_mode, num_bounds, all_cols, "Model2"
+)
+print(report2)
+
+# %% [markdown]
+# ---
+# ## 9. Results Summary
+
+# %%
 print("=" * 60)
 print("  FINAL RESULTS — TWO-LAYER PIPELINE")
 print("=" * 60)
 
 print(f"\n  Model 1 — Pre-Call Targeting")
 print(f"  Features           : Demographics + financial history")
-print(f"  CV Minority Recall : {m1['cv_score']:.4f}")
-print(f"  Best parameters    : {m1['params']}")
+print(f"  CV Minority Recall : {score1:.4f}")
+print(f"  Best parameters    : {params1}")
 
 print(f"\n  Model 2 — Post-Call Follow-Up")
 print(f"  Features           : All features (pre-call + call data)")
-print(f"  CV Minority Recall : {m2['cv_score']:.4f}")
-print(f"  Best parameters    : {m2['params']}")
+print(f"  CV Minority Recall : {score2:.4f}")
+print(f"  Best parameters    : {params2}")
 
-delta = m2['cv_score'] - m1['cv_score']
-pct   = delta / m1['cv_score'] * 100 if m1['cv_score'] > 0 else 0
+delta = score2 - score1
+pct   = delta / score1 * 100 if score1 > 0 else 0
 print(f"\n  Model 2 lift over Model 1 : +{delta:.4f}  ({pct:+.1f}%)")
 print("=" * 60)
 
@@ -295,7 +416,7 @@ print("=" * 60)
 
 # %% [markdown]
 # ---
-# ## 8. Concluding Remarks
+# ## 10. Concluding Remarks
 # *For hiring managers and technical reviewers*
 #
 # ---
