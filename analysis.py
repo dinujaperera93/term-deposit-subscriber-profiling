@@ -311,7 +311,7 @@ print(feat1)
 # ### Step 7.6 — Evaluation on Test Set (Model 1)
 
 # %%
-report1 = evaluate_model(
+report1, cm1 = evaluate_model(
     model1, X_test[pre_call_cols].copy(), y_test,
     le1, sc1, le_y1,
     pre_cat_cols, pre_num_cols, cat_mode, num_bounds, pre_call_cols, "Model1"
@@ -368,7 +368,7 @@ print(feat2)
 # ### Step 8.6 — Evaluation on Test Set (Model 2)
 
 # %%
-report2 = evaluate_model(
+report2, cm2 = evaluate_model(
     model2, X_test[all_cols].copy(), y_test,
     le2, sc2, le_y2,
     all_cat_cols, all_num_cols, cat_mode, num_bounds, all_cols, "Model2"
@@ -380,15 +380,58 @@ print(report2)
 # ## 9. Results Summary
 
 # %%
-print("  FINAL RESULTS — TWO-LAYER PIPELINE")
-
-print(f"\n  Model 1 — Pre-Call Targeting")
-print(f"  Features           : Demographics + financial history")
+print("Model 1 — Who to Call (Pre-Call Targeting)")
+print("  Business question : Which customers are worth contacting?")
 print(f"  CV Minority Recall : {score1:.4f}")
+print("  Key drivers:")
 print(feat1.to_string(index=False))
 
-print(f"\n  Model 2 — Post-Call Follow-Up")
-print(f"  Features           : All features (pre-call + call data)")
+print("\nModel 2 — Who Will Subscribe (Post-Call Follow-Up)")
+print("  Business question : Of those contacted, who is likely to subscribe?")
 print(f"  CV Minority Recall : {score2:.4f}")
+print("  Key drivers:")
 print(feat2.to_string(index=False))
+
+# %% [markdown]
+# ### Business Impact
+
+# %%
+CAMPAIGN_SIZE = 40_000
+
+# Model 1 confusion matrix: rows = actual, cols = predicted
+# [TN, FP]   →  actual Do Not Call
+# [FN, TP]   →  actual Call (subscriber)
+tn1, fp1, fn1, tp1 = cm1.ravel()
+total1 = tn1 + fp1 + fn1 + tp1
+
+predicted_no_call   = tn1 + fn1          # model says "Do Not Call"
+predicted_call      = tp1 + fp1          # model says "Call"
+pct_saved           = predicted_no_call / total1
+
+calls_saved         = int(pct_saved * CAMPAIGN_SIZE)
+useless_calls_test  = fp1                # called but won't subscribe
+missed_subs_test    = fn1               # missed subscribers
+correct_calls_test  = tp1              # correctly targeted
+
+avg_duration_sec     = X_train['duration'].mean()           # avg call duration from train only
+avg_duration_min     = avg_duration_sec / 60
+hours_saved_test     = predicted_no_call * avg_duration_sec / 3600
+hours_saved_campaign = calls_saved * avg_duration_sec / 3600
+
+print(f"Business Impact — Model 1 (Pre-Call Targeting)")
+print(f"  Test set size               : {total1:,}")
+print(f"  Predicted 'Do Not Call'     : {predicted_no_call:,}  ({100 * pct_saved:.1f}% of test set)")
+print(f"  Predicted 'Call'            : {predicted_call:,}")
+print()
+print(f"  Scaled to {CAMPAIGN_SIZE:,} campaign contacts:")
+print(f"    Calls avoided (saved)     : {calls_saved:,}")
+print()
+print(f"  Average call duration       : {avg_duration_sec:.0f}s  ({avg_duration_min:.1f} min)")
+print(f"  Agent hours saved (test)    : {hours_saved_test:.1f} hours")
+print(f"  Agent hours saved ({CAMPAIGN_SIZE:,})  : {hours_saved_campaign:.0f} hours  ({hours_saved_campaign/8:.0f} working days)")
+print()
+print(f"  Within the {predicted_call:,} calls made (test set):")
+print(f"    Correctly targeted        : {correct_calls_test:,}  (likely subscribers)")
+print(f"    Useless calls             : {useless_calls_test:,}  (won't subscribe)")
+print(f"    Missed subscribers        : {missed_subs_test:,}  (false negatives)")
 

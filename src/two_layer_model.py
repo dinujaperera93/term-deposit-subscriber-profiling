@@ -7,13 +7,11 @@ from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import (recall_score, make_scorer, classification_report,
                              confusion_matrix, ConfusionMatrixDisplay)
-from sklearn.ensemble import (RandomForestClassifier, ExtraTreesClassifier,
-                              VotingClassifier, StackingClassifier)
-from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neighbors import KNeighborsClassifier, NearestCentroid
 from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
 from lazypredict.Supervised import LazyClassifier
-from lightgbm import LGBMClassifier
-from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
+from hyperopt import fmin, tpe, hp, STATUS_OK, Trials, space_eval
 
 FIGURES_DIR = Path(__file__).resolve().parent.parent / "figures"
 FIGURES_DIR.mkdir(exist_ok=True)
@@ -234,15 +232,11 @@ def compare_ensembles(X_train, y_train, seed, cv=5):
     minority_recall = make_scorer(recall_score, pos_label=1)
 
     models = {
-        "LGBM":          LGBMClassifier(random_state=seed, verbose=-1, class_weight='balanced'),
-        "RandomForest":  RandomForestClassifier(random_state=seed, class_weight='balanced'),
-        "ExtraTrees":    ExtraTreesClassifier(random_state=seed, class_weight='balanced'),
-        "KNN":           KNeighborsClassifier(n_neighbors=7),
+        "NearestCentroid": NearestCentroid(),
+        "DecisionTree":    DecisionTreeClassifier(random_state=seed, class_weight='balanced'),
+        "LogisticReg":     LogisticRegression(random_state=seed, class_weight='balanced', max_iter=2000),
+        "KNN":             KNeighborsClassifier(n_neighbors=7),
     }
-
-    base = [(k, v) for k, v in models.items()]
-    models["Voting"]   = VotingClassifier(estimators=base, voting='soft')
-    models["Stacking"] = StackingClassifier(estimators=base, final_estimator=LogisticRegression(max_iter=2000), cv=5)
 
     results = []
     fitted_models = {}
@@ -275,19 +269,12 @@ def tune_hyperparameters(X_train_enc, y_train_enc, X_val_enc, y_val_enc, seed):
     y_combined = np.concatenate([y_train_enc, y_val_enc])
 
     space = {
-        'n_estimators': hp.quniform('n_estimators', 50, 500, 25),
-        'max_depth': hp.quniform('max_depth', 2, 8, 1),
-        'learning_rate': hp.uniform('learning_rate', 0.05, 0.2),
-        'num_leaves': hp.quniform('num_leaves', 5, 31, 5),
-        'min_child_samples': hp.quniform('min_child_samples', 10, 30, 5),
-        'subsample': hp.uniform('subsample', 0.7, 0.9),
-        'colsample_bytree': hp.uniform('colsample_bytree', 0.7, 0.9),
+        'metric':            hp.choice('metric', ['euclidean', 'manhattan']),
+        'shrink_threshold':  hp.uniform('shrink_threshold', 0.0, 1.0),
     }
 
     def objective(params):
-        p = {k: int(v) if k in ('n_estimators','max_depth','num_leaves','min_child_samples') else v
-             for k, v in params.items()}
-        model = LGBMClassifier(**p, random_state=seed, verbose=-1, class_weight='balanced')
+        model = NearestCentroid(**params)
         score = cross_val_score(model, X_combined, y_combined, cv=5, scoring=minority_recall).mean()
         return {'loss': -score, 'status': STATUS_OK}
 
@@ -295,9 +282,8 @@ def tune_hyperparameters(X_train_enc, y_train_enc, X_val_enc, y_val_enc, seed):
     best = fmin(fn=objective, space=space, algo=tpe.suggest, max_evals=10,
                 trials=trials, rstate=np.random.default_rng(seed))
 
-    best_params = {k: int(v) if k in ('n_estimators','max_depth','num_leaves','min_child_samples') else v
-                   for k, v in best.items()}
-    best_model = LGBMClassifier(**best_params, random_state=seed, verbose=-1, class_weight='balanced')
+    best_params = space_eval(space, best)
+    best_model = NearestCentroid(**best_params)
     best_model.fit(X_combined, y_combined)
     best_score = -min(t['result']['loss'] for t in trials.trials)
     print(f"Best Params: {best_params}")
@@ -305,9 +291,14 @@ def tune_hyperparameters(X_train_enc, y_train_enc, X_val_enc, y_val_enc, seed):
     return best_model, best_params, best_score
 
 def feature_importance(X_train, model):
+    if hasattr(model, 'feature_importances_'):
+        importances = np.round(model.feature_importances_, 6)
+    else:
+        # NearestCentroid: absolute difference between class centroids as importance proxy
+        importances = np.round(np.abs(model.centroids_[1] - model.centroids_[0]), 6)
     feat_df = pd.DataFrame({
         'Feature': X_train.columns,
-        'Importance': np.round(model.feature_importances_, 6)
+        'Importance': importances
     }).sort_values('Importance', ascending=False).reset_index(drop=True)
     plt.figure(figsize=(10, 6))
     sns.barplot(data=feat_df, x='Importance', y='Feature')
@@ -342,12 +333,13 @@ def evaluate_model(model, X_test, y_test, le_dict, scaler, le_y,
     }
     cm_title, disp_labels = label_map.get(label, (f"Confusion Matrix — {label}", ["No", "Yes"]))
     cm = confusion_matrix(y_enc, y_pred)
-    ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=disp_labels).plot()
-    plt.title(cm_title)
+    _, ax = plt.subplots()
+    ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=disp_labels).plot(ax=ax, colorbar=False)
+    ax.set_title(cm_title)
     plt.savefig(FIGURES_DIR / f"confusion_matrix_{label}.png", bbox_inches="tight")
     plt.show()
     plt.close()
-    return classification_report(y_enc, y_pred, target_names=le_y.classes_)
+    return classification_report(y_enc, y_pred, target_names=le_y.classes_), cm
 
 def train_two_layer_pipeline(df, seed, categorical_df, numeric_df):
     pre_call_cols, post_call_cols = get_feature_sets(df)
@@ -374,8 +366,8 @@ def train_two_layer_pipeline(df, seed, categorical_df, numeric_df):
     feat1 = feature_importance(X_tr_m1, model1)
     print("\nModel 1 Feature Importance:\n", feat1)
 
-    report1 = evaluate_model(model1, X_test[pre_call_cols].copy(), y_test, le1, sc1, le_y1,
-                             pre_cat, pre_num, cat_mode, num_bounds, pre_call_cols, "Model1")
+    report1, _ = evaluate_model(model1, X_test[pre_call_cols].copy(), y_test, le1, sc1, le_y1,
+                                pre_cat, pre_num, cat_mode, num_bounds, pre_call_cols, "Model1")
     print(f"\nModel 1 Test Performance:\n{report1}")
 
     results['model1'] = {'model': model1, 'params': params1, 'cv_score': score1,
@@ -397,8 +389,8 @@ def train_two_layer_pipeline(df, seed, categorical_df, numeric_df):
     feat2 = feature_importance(X_tr_m2, model2)
     print("\nModel 2 Feature Importance:\n", feat2)
 
-    report2 = evaluate_model(model2, X_test[all_cols].copy(), y_test, le2, sc2, le_y2,
-                             all_cat, all_num, cat_mode, num_bounds, all_cols, "Model2")
+    report2, _ = evaluate_model(model2, X_test[all_cols].copy(), y_test, le2, sc2, le_y2,
+                                all_cat, all_num, cat_mode, num_bounds, all_cols, "Model2")
     print(f"\nModel 2 Test Performance:\n{report2}")
 
     results['model2'] = {'model': model2, 'params': params2, 'cv_score': score2,
