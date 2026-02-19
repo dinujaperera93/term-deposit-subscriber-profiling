@@ -30,8 +30,7 @@
 #
 # **Goals:**
 # 1. Predict whether a customer will subscribe to a term deposit (`y`)
-# 2. Identify customer segments most likely to convert
-# 3. Determine which features most strongly drive subscription decisions
+# 2. Determine which features most strongly drive subscription decisions
 #
 # **Success Metric:** 81%+ accuracy via 5-fold cross-validation (average score)
 # **Key Operational Metric:** Minority-class recall — catching actual subscribers
@@ -43,11 +42,8 @@
 #
 # | Layer | Features Available | Purpose |
 # |-------|--------------------|---------|
-# | **Model 1 — Pre-call** | Demographics + financial history | Predict who to call *before* any contact |
-# | **Model 2 — Post-call** | All features (incl. call data) | Predict who to *continue* calling after contact |
-#
-# `duration` is only observable after a call ends — including it in a pre-call model
-# constitutes data leakage and is excluded from Model 1 by design.
+# | **Model 1 : Pre-call** | Demographics + financial history | Predict who to call *before* any contact |
+# | **Model 2 : Post-call** | All features (incl. call data) | Predict who to *continue* calling after contact |
 
 # %% [markdown]
 # ---
@@ -95,10 +91,10 @@ numeric_df, categorical_df = explore_data(term_deposit_df)
 #
 # | Class | Count | Share |
 # |-------|-------|-------|
-# | No (did not subscribe) | ~37,000 | ~88% |
-# | Yes (subscribed) | ~5,000 | ~12% |
+# | No (did not subscribe) | 37104 | 92.8% |
+# | Yes (subscribed) | 2896 | 7.2% |
 #
-# The dataset is highly imbalanced. A majority-class classifier achieves 88% accuracy
+# The dataset is highly imbalanced. A majority-class classifier achieves 92% accuracy
 # while being useless to the business. This drives two decisions:
 # - **Metric:** Optimise for minority-class recall alongside the 81% accuracy target
 # - **Model config:** `class_weight='balanced'` to penalise missed subscribers
@@ -109,12 +105,12 @@ numeric_df, categorical_df = explore_data(term_deposit_df)
 #
 # - **`age`:** Range 18–95, mean ~41. No anomalies.
 # - **`balance`:** Average yearly balance in euros. Can be negative (overdrafts).
-#   Range −6,847 to 102,127 — highly right-skewed with significant outliers.
-# - **`day`:** Day of month of last contact (1–31). Not a duration.
+#   Range −8,019 to 102,127; highly right-skewed with significant outliers.
+# - **`day`:** Day of month of last contact (1–31). Not a duration. Most calls have been made around 20th
 # - **`duration`:** Last call duration in seconds. Highly predictive but only known
-#   *after* the call ends — excluded from Model 1 to prevent data leakage.
+#   *after* the call ends; excluded from Model 1 to prevent data leakage.
 # - **`campaign`:** Number of contacts made this campaign. Most customers are contacted
-#   1–3 times; the distribution has a heavy right tail.
+#   1–3 times; the distribution has a heavy right tail. Maximum value is 63 which seems an outlier.
 #
 # ---
 #
