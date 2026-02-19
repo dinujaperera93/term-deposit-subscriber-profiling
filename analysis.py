@@ -380,16 +380,16 @@ print(report2)
 # ## 9. Results Summary
 
 # %%
-print("Model 1 — Who to Call (Pre-Call Targeting)")
+print("Model 1: Who to Call (Pre-Call Targeting)")
 print("  Business question : Which customers are worth contacting?")
 print(f"  CV Minority Recall : {score1:.4f}")
-print("  Key drivers:")
+print("  Feature Importance:")
 print(feat1.to_string(index=False))
 
-print("\nModel 2 — Who Will Subscribe (Post-Call Follow-Up)")
+print("\nModel 2: Who Will Subscribe (Post-Call Follow-Up)")
 print("  Business question : Of those contacted, who is likely to subscribe?")
 print(f"  CV Minority Recall : {score2:.4f}")
-print("  Key drivers:")
+print("  Feature Importance:")
 print(feat2.to_string(index=False))
 
 # %% [markdown]
@@ -399,8 +399,8 @@ print(feat2.to_string(index=False))
 CAMPAIGN_SIZE = 40_000
 
 # Model 1 confusion matrix: rows = actual, cols = predicted
-# [TN, FP]   →  actual Do Not Call
-# [FN, TP]   →  actual Call (subscriber)
+# [TN, FP]   --> actual Do Not Call
+# [FN, TP]   --> actual Call (subscriber)
 tn1, fp1, fn1, tp1 = cm1.ravel()
 total1 = tn1 + fp1 + fn1 + tp1
 
@@ -418,17 +418,17 @@ avg_duration_min     = avg_duration_sec / 60
 hours_saved_test     = predicted_no_call * avg_duration_sec / 3600
 hours_saved_campaign = calls_saved * avg_duration_sec / 3600
 
-print(f"Business Impact — Model 1 (Pre-Call Targeting)")
+print(f"Business Impact: Model 1 (Pre-Call Targeting)")
 print(f"  Test set size               : {total1:,}")
 print(f"  Predicted 'Do Not Call'     : {predicted_no_call:,}  ({100 * pct_saved:.1f}% of test set)")
 print(f"  Predicted 'Call'            : {predicted_call:,}")
 print()
 print(f"  Scaled to {CAMPAIGN_SIZE:,} campaign contacts:")
-print(f"    Calls avoided (saved)     : {calls_saved:,}")
+print(f"    Calls avoided (saved manpower) by the company is : {calls_saved:,}")
 print()
 print(f"  Average call duration       : {avg_duration_sec:.0f}s  ({avg_duration_min:.1f} min)")
-print(f"  Agent hours saved (test)    : {hours_saved_test:.1f} hours")
-print(f"  Agent hours saved ({CAMPAIGN_SIZE:,})  : {hours_saved_campaign:.0f} hours  ({hours_saved_campaign/8:.0f} working days)")
+print(f"  Hours saved (test)    : {hours_saved_test:.1f} hours")
+print(f"  Hours saved ({CAMPAIGN_SIZE:,})  : {hours_saved_campaign:.0f} hours  ({hours_saved_campaign/8:.0f} working days)")
 print()
 print(f"  Within the {predicted_call:,} calls made (test set):")
 print(f"    Correctly targeted        : {correct_calls_test:,}  (likely subscribers)")

@@ -269,12 +269,13 @@ def tune_hyperparameters(X_train_enc, y_train_enc, X_val_enc, y_val_enc, seed):
     y_combined = np.concatenate([y_train_enc, y_val_enc])
 
     space = {
-        'metric':            hp.choice('metric', ['euclidean', 'manhattan']),
-        'shrink_threshold':  hp.uniform('shrink_threshold', 0.0, 1.0),
+        'C':       hp.loguniform('C', np.log(0.01), np.log(100)),
+        'penalty': hp.choice('penalty', ['l1', 'l2']),
     }
 
     def objective(params):
-        model = NearestCentroid(**params)
+        model = LogisticRegression(**params, solver='saga', max_iter=2000,
+                                   class_weight='balanced', random_state=seed)
         score = cross_val_score(model, X_combined, y_combined, cv=5, scoring=minority_recall).mean()
         return {'loss': -score, 'status': STATUS_OK}
 
@@ -283,7 +284,8 @@ def tune_hyperparameters(X_train_enc, y_train_enc, X_val_enc, y_val_enc, seed):
                 trials=trials, rstate=np.random.default_rng(seed))
 
     best_params = space_eval(space, best)
-    best_model = NearestCentroid(**best_params)
+    best_model = LogisticRegression(**best_params, solver='saga', max_iter=2000,
+                                    class_weight='balanced', random_state=seed)
     best_model.fit(X_combined, y_combined)
     best_score = -min(t['result']['loss'] for t in trials.trials)
     print(f"Best Params: {best_params}")
@@ -293,9 +295,11 @@ def tune_hyperparameters(X_train_enc, y_train_enc, X_val_enc, y_val_enc, seed):
 def feature_importance(X_train, model):
     if hasattr(model, 'feature_importances_'):
         importances = np.round(model.feature_importances_, 6)
+    elif hasattr(model, 'coef_'):
+        # LogisticRegression: absolute coefficient values as importance proxy
+        importances = np.round(np.abs(model.coef_[0]), 6)
     else:
-        # NearestCentroid: absolute difference between class centroids as importance proxy
-        importances = np.round(np.abs(model.centroids_[1] - model.centroids_[0]), 6)
+        importances = np.zeros(X_train.shape[1])
     feat_df = pd.DataFrame({
         'Feature': X_train.columns,
         'Importance': importances
