@@ -7,6 +7,10 @@ from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import (recall_score, make_scorer, classification_report,
                              confusion_matrix, ConfusionMatrixDisplay)
+from sklearn.ensemble import (RandomForestClassifier, ExtraTreesClassifier,
+                              VotingClassifier, StackingClassifier)
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
 from lazypredict.Supervised import LazyClassifier
 from lightgbm import LGBMClassifier
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
@@ -226,6 +230,44 @@ def select_model(X_train_enc, X_val_enc, y_train_enc, y_val_enc):
     print(f"\nBest model for minority recall: {models['minority_recall'].idxmax()}")
     return models, predictions
 
+def compare_ensembles(X_train, y_train, seed, cv=5):
+    minority_recall = make_scorer(recall_score, pos_label=1)
+
+    models = {
+        "LGBM":          LGBMClassifier(random_state=seed, verbose=-1, class_weight='balanced'),
+        "RandomForest":  RandomForestClassifier(random_state=seed, class_weight='balanced'),
+        "ExtraTrees":    ExtraTreesClassifier(random_state=seed, class_weight='balanced'),
+        "KNN":           KNeighborsClassifier(n_neighbors=7),
+    }
+
+    base = [(k, v) for k, v in models.items()]
+    models["Voting"]   = VotingClassifier(estimators=base, voting='soft')
+    models["Stacking"] = StackingClassifier(estimators=base, final_estimator=LogisticRegression(max_iter=2000), cv=5)
+
+    results = []
+    fitted_models = {}
+    for name, model in models.items():
+        score = cross_val_score(model, X_train, y_train, cv=cv, scoring=minority_recall).mean()
+        model.fit(X_train, y_train)
+        fitted_models[name] = model
+        results.append({"Model": name, "Minority_Recall": round(score, 4)})
+
+    results_df = pd.DataFrame(results).sort_values("Minority_Recall", ascending=False).reset_index(drop=True)
+
+    plt.figure(figsize=(10, 5))
+    ax = sns.barplot(data=results_df, x="Model", y="Minority_Recall")
+    ax.bar_label(ax.containers[0], fmt='%.4f')
+    plt.title("Ensemble Comparison — Minority Recall (CV)")
+    plt.ylabel("Minority Recall")
+    plt.grid(True, axis='y')
+    plt.tight_layout()
+    plt.savefig(FIGURES_DIR / "model_comparison.png", bbox_inches='tight')
+    plt.show()
+    plt.close()
+
+    return fitted_models, results_df
+
+
 def tune_hyperparameters(X_train_enc, y_train_enc, X_val_enc, y_val_enc, seed):
     np.random.seed(seed)
     minority_recall = make_scorer(recall_score, pos_label=1)
@@ -282,9 +324,11 @@ def evaluate_model(model, X_test, y_test, le_dict, scaler, le_y,
                    cat_cols, num_cols, cat_mode, num_bounds, cols, label=""):
     # Evaluate supervised model on test set
     for col, mode_val in cat_mode.items():  # contact not in cat_mode — its "unknown" is kept
-        X_test[col] = X_test[col].replace("unknown", pd.NA).fillna(mode_val)
+        if col in X_test.columns:
+            X_test[col] = X_test[col].replace("unknown", pd.NA).fillna(mode_val)
     for col, (lo, hi) in num_bounds.items():
-        X_test[col] = X_test[col].clip(lo, hi)
+        if col in X_test.columns:
+            X_test[col] = X_test[col].clip(lo, hi)
     for col in cat_cols:
         X_test[col] = le_dict[col].transform(X_test[col])
     
@@ -292,9 +336,14 @@ def evaluate_model(model, X_test, y_test, le_dict, scaler, le_y,
     y_enc = le_y.transform(y_test)
     y_pred = model.predict(X_test)
 
+    label_map = {
+        "Model1": ("Pre-Call Targeting", ["Do Not Call", "Call"]),
+        "Model2": ("Post-Call Follow-Up", ["Not Subscribed", "Subscribed"]),
+    }
+    cm_title, disp_labels = label_map.get(label, (f"Confusion Matrix — {label}", ["No", "Yes"]))
     cm = confusion_matrix(y_enc, y_pred)
-    ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=le_y.classes_).plot()
-    plt.title(f"Confusion Matrix — {label}")
+    ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=disp_labels).plot()
+    plt.title(cm_title)
     plt.savefig(FIGURES_DIR / f"confusion_matrix_{label}.png", bbox_inches="tight")
     plt.show()
     plt.close()
@@ -310,8 +359,8 @@ def train_two_layer_pipeline(df, seed, categorical_df, numeric_df):
     results = {}
 
     # Model 1: Pre-call features (Who to call)
-    pre_cat = categorical_df[[c for c in pre_call_cols if c in categorical_df.columns]]
-    pre_num = numeric_df[[c for c in pre_call_cols if c in numeric_df.columns]]
+    pre_cat = [c for c in pre_call_cols if c in cat_cols]
+    pre_num = [c for c in pre_call_cols if c in num_cols]
 
     X_tr_m1, X_va_m1, y_tr_m1, y_va_m1, le1, sc1, le_y1 = encode_data(
         X_train_cleaned[pre_call_cols], X_val_cleaned[pre_call_cols],
@@ -325,7 +374,7 @@ def train_two_layer_pipeline(df, seed, categorical_df, numeric_df):
     feat1 = feature_importance(X_tr_m1, model1)
     print("\nModel 1 Feature Importance:\n", feat1)
 
-    report1 = evaluate_model(model1, X_test, y_test, le1, sc1, le_y1,
+    report1 = evaluate_model(model1, X_test[pre_call_cols].copy(), y_test, le1, sc1, le_y1,
                              pre_cat, pre_num, cat_mode, num_bounds, pre_call_cols, "Model1")
     print(f"\nModel 1 Test Performance:\n{report1}")
 
@@ -333,8 +382,8 @@ def train_two_layer_pipeline(df, seed, categorical_df, numeric_df):
                          'features': feat1, 'report': report1}
 
     # Model 2: All features (Who to continue calling)
-    all_cat = categorical_df[[c for c in all_cols if c in categorical_df.columns]]
-    all_num = numeric_df[[c for c in all_cols if c in numeric_df.columns]]
+    all_cat = [c for c in all_cols if c in cat_cols]
+    all_num = [c for c in all_cols if c in num_cols]
 
     X_tr_m2, X_va_m2, y_tr_m2, y_va_m2, le2, sc2, le_y2 = encode_data(
         X_train_cleaned[all_cols], X_val_cleaned[all_cols],
@@ -348,7 +397,7 @@ def train_two_layer_pipeline(df, seed, categorical_df, numeric_df):
     feat2 = feature_importance(X_tr_m2, model2)
     print("\nModel 2 Feature Importance:\n", feat2)
 
-    report2 = evaluate_model(model2, X_test, y_test, le2, sc2, le_y2,
+    report2 = evaluate_model(model2, X_test[all_cols].copy(), y_test, le2, sc2, le_y2,
                              all_cat, all_num, cat_mode, num_bounds, all_cols, "Model2")
     print(f"\nModel 2 Test Performance:\n{report2}")
 

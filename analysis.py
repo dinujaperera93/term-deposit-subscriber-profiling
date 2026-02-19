@@ -58,7 +58,7 @@ import random
 from src.two_layer_model import (
     load_data, get_feature_sets, explore_data,
     split_data, data_cleaning, encode_data,
-    select_model, tune_hyperparameters,
+    select_model, compare_ensembles, tune_hyperparameters,
     feature_importance, evaluate_model
 )
 
@@ -285,20 +285,30 @@ models_df1, _ = select_model(X_tr_m1, X_va_m1, y_tr_enc, y_va_enc)
 print(models_df1)
 
 # %% [markdown]
-# ### Step 7.3 — Hyperparameter Tuning (Model 1)
+# ### Step 7.3 — Ensemble Comparison (Model 1)
+#
+# Compares tree-based, distance-based, and ensemble strategies via 5-fold CV minority recall.
+# The best-performing architecture is then carried forward to hyperparameter tuning.
+
+# %%
+fitted_models1, ensemble_df1 = compare_ensembles(X_tr_m1, y_tr_enc, SEED)
+print(ensemble_df1)
+
+# %% [markdown]
+# ### Step 7.4 — Hyperparameter Tuning (Model 1)
 
 # %%
 model1, params1, score1 = tune_hyperparameters(X_tr_m1, y_tr_enc, X_va_m1, y_va_enc, SEED)
 
 # %% [markdown]
-# ### Step 7.4 — Feature Importance (Model 1)
+# ### Step 7.5 — Feature Importance (Model 1)
 
 # %%
 feat1 = feature_importance(X_tr_m1, model1)
 print(feat1)
 
 # %% [markdown]
-# ### Step 7.5 — Evaluation on Test Set (Model 1)
+# ### Step 7.6 — Evaluation on Test Set (Model 1)
 
 # %%
 report1 = evaluate_model(
@@ -335,20 +345,27 @@ models_df2, _ = select_model(X_tr_m2, X_va_m2, y_tr_enc2, y_va_enc2)
 print(models_df2)
 
 # %% [markdown]
-# ### Step 8.3 — Hyperparameter Tuning (Model 2)
+# ### Step 8.3 — Ensemble Comparison (Model 2)
+
+# %%
+fitted_models2, ensemble_df2 = compare_ensembles(X_tr_m2, y_tr_enc2, SEED)
+print(ensemble_df2)
+
+# %% [markdown]
+# ### Step 8.4 — Hyperparameter Tuning (Model 2)
 
 # %%
 model2, params2, score2 = tune_hyperparameters(X_tr_m2, y_tr_enc2, X_va_m2, y_va_enc2, SEED)
 
 # %% [markdown]
-# ### Step 8.4 — Feature Importance (Model 2)
+# ### Step 8.5 — Feature Importance (Model 2)
 
 # %%
 feat2 = feature_importance(X_tr_m2, model2)
 print(feat2)
 
 # %% [markdown]
-# ### Step 8.5 — Evaluation on Test Set (Model 2)
+# ### Step 8.6 — Evaluation on Test Set (Model 2)
 
 # %%
 report2 = evaluate_model(
@@ -363,88 +380,15 @@ print(report2)
 # ## 9. Results Summary
 
 # %%
-print("=" * 60)
 print("  FINAL RESULTS — TWO-LAYER PIPELINE")
-print("=" * 60)
 
 print(f"\n  Model 1 — Pre-Call Targeting")
 print(f"  Features           : Demographics + financial history")
 print(f"  CV Minority Recall : {score1:.4f}")
-print(f"  Best parameters    : {params1}")
+print(feat1.to_string(index=False))
 
 print(f"\n  Model 2 — Post-Call Follow-Up")
 print(f"  Features           : All features (pre-call + call data)")
 print(f"  CV Minority Recall : {score2:.4f}")
-print(f"  Best parameters    : {params2}")
+print(feat2.to_string(index=False))
 
-delta = score2 - score1
-pct   = delta / score1 * 100 if score1 > 0 else 0
-print(f"\n  Model 2 lift over Model 1 : +{delta:.4f}  ({pct:+.1f}%)")
-print("=" * 60)
-
-# %% [markdown]
-# ### Results Interpretation
-#
-# **Model 2 outperforms Model 1** — post-call features, particularly `duration`,
-# add substantial predictive signal once contact has been made.
-#
-# **Model 1 solves the upstream targeting problem:** which customers should enter
-# the calling funnel at all. The two models are sequential, not competing:
-#
-# ```
-# Customer database
-#        |
-#        v
-# Model 1  ->  Score all customers pre-campaign  ->  Prioritise top tier
-#        |
-#        v
-# Call made  ->  Duration, contact type, date recorded
-#        |
-#        v
-# Model 2  ->  Re-score with all data  ->  High: follow up | Low: stop
-# ```
-#
-# ### Feature Importance
-#
-# | Feature | Business Interpretation |
-# |---------|------------------------|
-# | `duration` | Longer calls indicate engagement — strong signal for follow-up |
-# | `balance` | Higher account balance correlates with investment readiness |
-# | `age` | Certain age segments respond more strongly to term deposit offers |
-# | `month` | Campaign timing matters — high-conversion months can be planned for |
-# | `campaign` | Diminishing returns beyond 3–4 contacts; cap outreach per customer |
-
-# %% [markdown]
-# ---
-# ## 10. Concluding Remarks
-# *For hiring managers and technical reviewers*
-#
-# ---
-#
-# **Architecture:** The two-layer design is the central contribution — not a
-# hyperparameter choice or library selection. Aligning model boundaries with the
-# natural information timeline of a telemarketing campaign produces a system that
-# is both more honest and more deployable than a single all-features classifier.
-#
-# **Data integrity:** Every transformation is fitted on training data only.
-# Stored parameters are applied to validation and test sets consistently.
-# This discipline is critical for reliable evaluation and is frequently absent
-# in exploratory notebooks.
-#
-# **Interpretability:** LightGBM feature importance is a deliverable, not just
-# a diagnostic. The client receives clear, ranked signals about which customer
-# attributes drive subscriptions — enabling operational targeting decisions
-# without needing to understand the model internals.
-#
-# **Reproducibility:** All randomness is controlled via `SEED`. Intermediate
-# outputs and figures are persisted to `figures/`. The pipeline retrains on
-# new campaign data with a single function call.
-#
-# ---
-#
-# **Skills demonstrated:**
-# Binary classification · Imbalanced data · Feature engineering ·
-# Data leakage prevention · Pipeline design · Stratified splitting ·
-# Bayesian hyperparameter optimisation (Hyperopt / TPE) · LightGBM ·
-# LazyPredict model benchmarking · Feature importance interpretation ·
-# Reproducible experiment design

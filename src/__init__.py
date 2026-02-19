@@ -6,6 +6,7 @@ from .two_layer_model import (
     data_cleaning,
     encode_data,
     select_model,
+    compare_ensembles,
     tune_hyperparameters,
     feature_importance,
     evaluate_model,
