@@ -12,3 +12,4 @@ from .two_layer_model import (
     evaluate_model,
     train_two_layer_pipeline
 )
+from .cluster_model import cluster_subscribers

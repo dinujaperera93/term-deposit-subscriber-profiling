@@ -54,7 +54,9 @@ import warnings
 warnings.filterwarnings("ignore")
 from pathlib import Path
 import random
+import duckdb
 
+from src.cluster_model import cluster_subscribers
 from src.two_layer_model import (
     load_data, get_feature_sets, explore_data,
     split_data, data_cleaning, encode_data,
@@ -434,4 +436,18 @@ print(f"  Within the {predicted_call:,} calls made (test set):")
 print(f"    Correctly targeted        : {correct_calls_test:,}  (likely subscribers)")
 print(f"    Useless calls             : {useless_calls_test:,}  (won't subscribe)")
 print(f"    Missed subscribers        : {missed_subs_test:,}  (false negatives)")
+
+# %% [markdown]
+# ---
+# ## 10. Subscriber Segmentation — KMeans Clustering
+
+# %%
+subscribers = duckdb.sql("""
+    SELECT *
+    FROM term_deposit_df
+    WHERE y = 'yes'
+""").df()
+
+print(f"Subscribers: {len(subscribers):,}")
+cluster_subscribers(subscribers)
 

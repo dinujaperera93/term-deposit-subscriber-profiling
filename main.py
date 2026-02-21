@@ -2,7 +2,9 @@ import warnings
 warnings.filterwarnings("ignore")
 from pathlib import Path
 import random
+import duckdb
 from src.two_layer_model import load_data, explore_data, train_two_layer_pipeline
+from src.cluster_model import cluster_subscribers
 
 def main():
     seed = random.randint(1000, 9999)
@@ -16,8 +18,15 @@ def main():
 
     results = train_two_layer_pipeline(term_deposit_df, seed, categorical_df, numeric_df)
 
-    print(f"Model 2 (LGBM)  - CV Minority Recall:  {results['model2']['cv_score']:.4f}")
+    # Select subscribers from term_deposit_df
+    subscribers = duckdb.sql("""
+        SELECT *
+        FROM term_deposit_df
+        WHERE y = 'yes'
+    """).df()
 
+    print(f"Subscribers: {len(subscribers):,}")
+    cluster_subscribers(subscribers, save_dir='plots')
 
 if __name__ == "__main__":
     main()
