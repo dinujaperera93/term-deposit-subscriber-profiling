@@ -9,7 +9,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.1
 #   kernelspec:
-#     display_name: base
+#     display_name: Python 3
 #     language: python
 #     name: python3
 # ---
@@ -451,3 +451,78 @@ subscribers = duckdb.sql("""
 print(f"Subscribers: {len(subscribers):,}")
 cluster_subscribers(subscribers)
 
+
+# %% [markdown]
+# ### Plot 1 — Scatter Plot: age vs balance (Standardised)
+#
+# **What it shows:** The raw distribution of the 2,896 subscribers across the two most financially descriptive numerical features before any clustering is applied.
+#
+# **Conclusion:** Subscribers are spread across all age groups (18–70 after IQR clipping) and a wide balance range. The scatter is not tightly grouped, confirming that subscribers are a heterogeneous group — there is no single "typical" subscriber profile on these two dimensions alone. This motivates clustering across all 5 numerical features to find hidden structure.
+#
+# ---
+#
+# ### Plot 2 — KMeans k=2 to k=6 (5-panel)
+#
+# **What it shows:** How the age-balance space is partitioned as the number of clusters increases from 2 to 6. Yellow markers are centroids.
+#
+# **Conclusion:** At low k (2–3), clusters separate subscribers by balance level — a financially wealthier group vs a lower-balance group. As k increases, age begins to contribute more to the partitioning. Beyond k=3 the clusters fragment without producing meaningfully distinct groups, suggesting diminishing returns. The silhouette score and elbow method (below) guide the optimal choice.
+#
+# ---
+#
+# ### Plot 3 — Silhouette Scores (2×2 grid, k=2 to k=5)
+#
+# **What it shows:** Each subplot shows the cluster assignments for a given k alongside its silhouette score. The silhouette score ranges from −1 to 1: higher values mean clusters are dense and well-separated.
+#
+# **Conclusion:** The silhouette score peaks at **k=2**, indicating that two clusters best capture the structure in the subscriber data across all 5 features. This is consistent with the "most parsimonious clustering" comment in the code — splitting subscribers into two behavioural segments is statistically justified and operationally interpretable.
+#
+# ---
+#
+# ### Plot 4 — Cluster Describe (k=2)
+#
+# **What it shows:** Descriptive statistics (`mean`, `std`, `min`, `max`) for each of the two clusters, computed on the standardised features.
+#
+# **Conclusion — Two subscriber segments emerge:**
+#
+# | | Cluster 0 | Cluster 1 |
+# |---|---|---|
+# | `age` | Lower (younger) | Higher (older) |
+# | `balance` | Lower | Higher |
+# | `duration` | Longer calls | Shorter calls |
+# | `campaign` | More contacts needed | Fewer contacts needed |
+#
+# - **Cluster 0 — Younger, lower-balance subscribers:** These customers required longer calls and more campaign contacts before committing. They may be first-time savers or less financially established. Higher persuasion cost per conversion.
+# - **Cluster 1 — Older, higher-balance subscribers:** These customers converted with shorter calls and fewer contacts. Likely experienced savers with existing financial products. Lower persuasion cost and higher lifetime value.
+#
+# ---
+#
+# ### Plot 5 — Correlated Feature Pairs (3-panel)
+#
+# **age vs balance (corr: 0.08)**
+# Clusters separate primarily along the balance axis rather than age. Older customers tend to have slightly higher balances (consistent with the 0.08 correlation), but the overlap is large. The wealthier cluster spans all ages, suggesting that financial position — not age alone — drives subscription behaviour.
+#
+# **age vs duration (corr: −0.04)**
+# The negative correlation confirms that younger subscribers tend to have longer call durations. Younger customers take longer to be convinced, which is an important operational insight — agents should expect and budget for longer calls when targeting younger segments.
+#
+# **day vs campaign (corr: 0.17)**
+# Contacts later in the month correlate weakly with more campaign attempts. The clustering shows that high-quality subscribers (Cluster 1) tend to be reached with fewer calls and earlier in the month, while Cluster 0 subscribers required more persistent follow-up.
+#
+# ---
+#
+# ### Plot 6 — Elbow Method (WCSS)
+#
+# **What it shows:** Within-Cluster Sum of Squares (WCSS) for k=1 to 6. The "elbow" — where the rate of decrease sharply slows — indicates the optimal number of clusters.
+#
+# **Conclusion:** The elbow occurs at **k=2**, consistent with the silhouette score finding. Beyond k=2, adding more clusters reduces WCSS marginally but at the cost of interpretability. Two clusters is the statistically and operationally optimal segmentation for this subscriber population.
+#
+# ---
+#
+# ### Overall Clustering Conclusion
+#
+# KMeans clustering on the 2,896 confirmed subscribers reveals **two distinct behavioural segments**:
+#
+# | Segment | Profile | Campaign Strategy |
+# |---|---|---|
+# | **Cluster 0** — High-effort converters | Younger, lower balance, longer calls, more contacts | Allow more agent time; use patience-based scripts |
+# | **Cluster 1** — Low-effort converters | Older, higher balance, shorter calls, fewer contacts | Prioritise in targeting; high ROI per call |
+#
+# These segments are not visible from the full dataset (which is dominated by non-subscribers) and only emerge after DuckDB filtering to `y = 'yes'`. The bank should develop **differentiated contact strategies** for each segment to maximise conversion efficiency.

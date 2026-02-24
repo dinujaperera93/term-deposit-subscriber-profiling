@@ -17,4 +17,5 @@ dependencies = [
     "hyperopt==0.2.7",
     "jupytext==1.16.6",
     "duckdb==1.2.0",
+    "networkx>=3.2",
 ]

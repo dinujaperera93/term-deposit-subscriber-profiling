@@ -12,4 +12,4 @@ from .two_layer_model import (
     evaluate_model,
     train_two_layer_pipeline
 )
-from .cluster_model import cluster_subscribers
+from .cluster_model import cluster_subscribers, plot_3d_scatter, plot_correlation_graph
