@@ -73,9 +73,11 @@ def cluster_subscribers(df, save_dir=None):
         model = KMeans(n_clusters=k, init='k-means++', n_init='auto')
         cluster_labels = model.fit_predict(X)
 
-        axs[k-2].scatter(X[:, 0], X[:, 1], c=cluster_labels, s=50, cmap='viridis')
+        axs[k-2].scatter(X[:, 2], X[:, 4], c=cluster_labels, s=50, cmap='viridis')
         axs[k-2].set_title(f'k={k}')
-        centroids = model.cluster_centers_[:, :2]
+        axs[k-2].set_xlabel('day')
+        axs[k-2].set_ylabel('campaign')
+        centroids = model.cluster_centers_[:, [2, 4]]
         axs[k-2].scatter(centroids[:, 0], centroids[:, 1], marker='o', c='yellow', s=200, edgecolors='black', label='Centroids')
 
     _savefig_or_show(fig, 'kmeans_k2_to_k20', save_dir)
@@ -89,9 +91,11 @@ def cluster_subscribers(df, save_dir=None):
         model = KMeans(n_clusters=k, init='k-means++', n_init='auto')
         cluster_labels = model.fit_predict(X)
         score = silhouette_score(X, cluster_labels)
-        axs[k-2].scatter(X[:, 0], X[:, 1], c=cluster_labels, s=50, cmap='viridis')
+        axs[k-2].scatter(X[:, 2], X[:, 4], c=cluster_labels, s=50, cmap='viridis')
         axs[k-2].set_title(f'k={k}, Silhouette Score: {score:.4f}')
-        centroids = model.cluster_centers_[:, :2]
+        axs[k-2].set_xlabel('day')
+        axs[k-2].set_ylabel('campaign')
+        centroids = model.cluster_centers_[:, [2, 4]]
         axs[k-2].scatter(centroids[:, 0], centroids[:, 1], marker='o', c='yellow', s=200, edgecolors='black', label='Centroids')
 
     plt.tight_layout()
@@ -109,6 +113,7 @@ def cluster_subscribers(df, save_dir=None):
     # Scatter plots for correlated feature pairs (from correlation map)
     fig, axs = plt.subplots(2, 3, figsize=(18, 10))
     fig.suptitle('KMeans Clustering - Correlated Feature Pairs', fontsize=16)
+    axs = axs.flatten()
 
     # age vs balance (corr: 0.08)
     axs[0].scatter(X[:, 0], X[:, 1], c=cluster_labels, s=50, cmap='viridis')
@@ -127,24 +132,24 @@ def cluster_subscribers(df, save_dir=None):
     axs[2].set_title('day vs campaign (corr: 0.17)')
     axs[2].set_xlabel('day')
     axs[2].set_ylabel('campaign')
-    
+
     # age vs campaign (corr: 0.02)
-    axs[0].scatter(X[:, 0], X[:, 4], c=cluster_labels, s=50, cmap='viridis')
-    axs[0].set_title('age vs campaign (corr: 0.02)')
-    axs[0].set_xlabel('age')
-    axs[0].set_ylabel('campaign')
+    axs[3].scatter(X[:, 0], X[:, 4], c=cluster_labels, s=50, cmap='viridis')
+    axs[3].set_title('age vs campaign (corr: 0.02)')
+    axs[3].set_xlabel('age')
+    axs[3].set_ylabel('campaign')
 
     # day vs duration (corr: -0.03)
-    axs[1].scatter(X[:, 2], X[:, 3], c=cluster_labels, s=50, cmap='viridis')
-    axs[1].set_title('day vs duration (corr: -0.03)')
-    axs[1].set_xlabel('day')
-    axs[1].set_ylabel('duration')
+    axs[4].scatter(X[:, 2], X[:, 3], c=cluster_labels, s=50, cmap='viridis')
+    axs[4].set_title('day vs duration (corr: -0.03)')
+    axs[4].set_xlabel('day')
+    axs[4].set_ylabel('duration')
 
     # balance vs duration (corr: 0.17)
-    axs[2].scatter(X[:, 1], X[:, 3], c=cluster_labels, s=50, cmap='viridis')
-    axs[2].set_title('balance vs duration (corr: 0.17)')
-    axs[2].set_xlabel('balance')
-    axs[2].set_ylabel('duration')
+    axs[5].scatter(X[:, 1], X[:, 3], c=cluster_labels, s=50, cmap='viridis')
+    axs[5].set_title('balance vs duration (corr: 0.17)')
+    axs[5].set_xlabel('balance')
+    axs[5].set_ylabel('duration')
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     _savefig_or_show(fig, 'correlated_pairs', save_dir)
