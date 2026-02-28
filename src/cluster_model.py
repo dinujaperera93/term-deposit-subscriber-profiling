@@ -42,6 +42,7 @@ def cluster_subscribers(df, save_dir=None):
         (1, 3, 4, 'balance',  'duration', 'campaign'),
         (0, 3, 4, 'age',      'duration', 'campaign'),
         (4, 2, 3, 'campaign', 'day',      'duration'),
+        (0, 4, 2, 'age',      'campaign', 'day'),
     ]
     fig = plt.figure(figsize=(18, 24))
     fig.suptitle('Feature Scatter Plots — 2D Pairs and 3D Triplets (Standardised)', fontsize=16)
@@ -154,19 +155,38 @@ def cluster_subscribers(df, save_dir=None):
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     _savefig_or_show(fig, 'correlated_pairs', save_dir)
 
-    # The elbow method
+    # The elbow method — find elbow automatically using largest drop in WCSS
     wcss = []
     for k in range(1, 20):
         kmeans = KMeans(n_clusters=k, init='k-means++', n_init='auto')
         kmeans.fit(X)
         wcss.append(kmeans.inertia_)
-    fig = plt.figure(figsize=(10, 5))
-    plt.grid()
-    plt.plot(range(1, 20), wcss, linewidth=2, color="blue", marker="8")
-    plt.xlabel("K")
-    plt.xticks([x for x in range(1, 20)])
-    plt.ylabel("WCSS")
+
+    # Elbow = k where the drop from k to k+1 is smallest relative to k-1 to k
+    drops = [wcss[i] - wcss[i + 1] for i in range(len(wcss) - 1)]
+    # Second derivative: where the drop itself decreases most sharply
+    second_diff = [drops[i] - drops[i + 1] for i in range(len(drops) - 1)]
+    elbow_k = second_diff.index(max(second_diff)) + 2  # +2 because k starts at 1
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.grid()
+    ax.plot(range(1, 20), wcss, linewidth=2, color="blue", marker="8")
+    ax.axvline(x=elbow_k, color='red', linestyle='--', linewidth=1.5, label=f'Elbow at k={elbow_k}')
+    ax.annotate(
+        f'Elbow\nk={elbow_k}',
+        xy=(elbow_k, wcss[elbow_k - 1]),
+        xytext=(elbow_k + 1.5, wcss[elbow_k - 1] + (wcss[0] - wcss[-1]) * 0.1),
+        arrowprops=dict(arrowstyle='->', color='red'),
+        color='red', fontsize=11, fontweight='bold'
+    )
+    ax.set_title('Elbow Method — Optimal Number of Clusters', fontsize=13)
+    ax.set_xlabel('K (number of clusters)')
+    ax.set_xticks(range(1, 20))
+    ax.set_ylabel('WCSS (Within-Cluster Sum of Squares)')
+    ax.legend()
+    plt.tight_layout()
     _savefig_or_show(fig, 'elbow_method', save_dir)
+    print(f"Elbow detected at k={elbow_k}")
     print(wcss)
 
     plot_correlation_graph(save_dir)
@@ -180,6 +200,7 @@ def plot_3d_scatter(X, cluster_labels, save_dir=None):
         (1, 3, 4, 'balance',  'duration', 'campaign'),
         (0, 3, 4, 'age',      'duration', 'campaign'),
         (4, 2, 3, 'campaign', 'day',      'duration'),
+        (0, 4, 2, 'age',      'campaign', 'day'),
     ]
     fig = plt.figure(figsize=(16, 12))
     fig.suptitle('3D Scatter Plots — Most Meaningful Feature Triplets (k=2)', fontsize=15)

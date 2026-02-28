@@ -457,96 +457,92 @@ cluster_subscribers(subscribers)
 # %% [markdown]
 # ### Plot 1 — Combined 2D Pairs and 3D Triplets (Standardised)
 #
-# **What it shows:** A 4×3 figure — top 2 rows contain 6 pairwise 2D scatter plots across all numerical feature combinations; bottom 2 rows contain 4 three-dimensional scatter plots for the most meaningful feature triplets (age/balance/duration, balance/duration/campaign, age/duration/campaign, campaign/day/duration).
+# > **Note on axis values:** All features are **standardised (z-score)** before plotting.
+# > A value of 0 = population mean; negative = below average; positive = above average.
+# > For example, `day` ranges 1–31 (mean ≈ 15), so day=5 appears as approximately −1.3
 #
-# **Conclusion:** No tight clusters are visible in any 2D or 3D view before clustering is applied. Subscribers are spread heterogeneously across all feature combinations, confirming that no single pair or triplet alone separates them. This motivates running KMeans across all 5 features simultaneously to detect hidden structure.
+# **What it shows:** A 4×3 figure — top 2 rows: 6 pairwise 2D scatter plots for all feature combinations; bottom 2 rows: 5 three-dimensional scatter plots (age/balance/duration, balance/duration/campaign, age/duration/campaign, campaign/day/duration, age/campaign/day). No cluster colours — raw distribution only.
 #
-# ---
-#
-# ### Plot 2 — KMeans k=2 to k=19 (3×6 grid, day vs campaign)
-#
-# **What it shows:** How the day–campaign space is partitioned as k increases from 2 to 19. Clustering runs on all 5 features; day and campaign are used as visualisation axes. Yellow markers are centroids projected onto these two axes.
-#
-# **Conclusion:** At low k (2–3), clusters separate subscribers along the campaign axis — those contacted fewer times vs those requiring persistent follow-up. Beyond k=4–5, clusters fragment without forming meaningful new segments. The day axis shows weaker separation, consistent with its near-zero feature importance. The silhouette score and elbow method confirm the optimal k.
+# **Conclusion:** Subscribers are scattered with no obvious groupings in 2D or 3D. No single pair or triplet cleanly separates subscribers. Clustering on all 5 features together is needed to reveal hidden structure.
 #
 # ---
 #
-# ### Plot 3 — Silhouette Scores (3×6 grid, k=2 to k=19, day vs campaign)
+# ### Plot 2 — KMeans k=2 to k=19 (3×6 grid, day vs campaign axes)
 #
-# **What it shows:** Each subplot shows cluster assignments for a given k alongside its silhouette score on day vs campaign axes. Silhouette ranges from −1 to 1; higher = denser, better-separated clusters.
+# **What it shows:** Cluster assignments for k=2 to k=19. Clustering uses all 5 features. The x-axis is `day` (standardised), y-axis is `campaign` (standardised) — these two axes are chosen because campaign vs day is the highest correlation pair (0.17). Yellow circles = cluster centroids projected onto these axes.
 #
-# **Conclusion:** The silhouette score peaks at **k=2**, confirming two clusters as the most statistically justified segmentation. Beyond k=4 scores plateau or decline, indicating additional clusters capture noise rather than structure.
+# **Why axes go negative:** Both `day` and `campaign` are standardised. Day (mean ≈ 15) spans roughly −2 to +2. Campaign (mean ≈ 2.5) is similar. Negative simply means "below average" — not an error.
+#
+# **Conclusion:** At k=2–3, subscribers split mainly along the campaign axis — few contacts vs many follow-up calls. Beyond k=5, clusters fragment into noise.
 #
 # ---
 #
-# ### Plot 4 — Cluster Describe (k=2)
+# ### Plot 3 — Silhouette Scores (3×6 grid, k=2 to k=19)
 #
-# **What it shows:** Descriptive statistics (`mean`, `std`, `min`, `max`) for each of the two clusters across all 5 standardised features.
+# **What it shows:** Same layout as Plot 2. Each subplot title shows the silhouette score for that k. Silhouette ranges from −1 to 1: near 1 = tight, well-separated clusters; near 0 = overlapping clusters.
 #
-# **Conclusion — Two subscriber segments emerge:**
+# **Conclusion:** Score peaks at **k=2**, confirming two clusters is the most statistically justified segmentation. Scores decline as k increases beyond 4.
+#
+# ---
+#
+# ### Plot 4 — Cluster Statistics (k=2, printed table — not a visual plot)
+#
+# **What it shows:** Mean, std, min, max for each feature within each of the 2 clusters. Values are in standardised units (positive = above average, negative = below average).
+#
+# **Two subscriber segments:**
 #
 # | | Cluster 0 | Cluster 1 |
 # |---|---|---|
-# | `age` | Lower (younger) | Higher (older) |
+# | `age` | Younger (below avg) | Older (above avg) |
 # | `balance` | Lower | Higher |
 # | `duration` | Longer calls | Shorter calls |
 # | `campaign` | More contacts needed | Fewer contacts needed |
 # | `day` | Later in month | Earlier in month |
 #
-# - **Cluster 0 — High-effort converters:** Younger, lower-balance subscribers who required more campaign contacts and longer calls. Likely first-time savers who needed more persuasion. Higher cost per conversion.
-# - **Cluster 1 — Low-effort converters:** Older, higher-balance subscribers who converted with fewer contacts and shorter calls. Experienced savers with existing financial products. Lower cost per conversion and higher lifetime value.
+# - **Cluster 0 — High-effort converters:** Younger, lower-balance subscribers needing more campaign contacts and longer calls. Higher cost per conversion.
+# - **Cluster 1 — Low-effort converters:** Older, higher-balance subscribers converting quickly with fewer contacts. Lower cost per conversion and higher lifetime value.
 #
 # ---
 #
-# ### Plot 5 — Correlated Feature Pairs (2×3 grid, 6 panels)
+# ### Plot 5 — Correlated Feature Pairs with Cluster Colours (k=2, 2×3 grid)
 #
-# **Row 1**
+# **What it shows:** 6 scatter plots — each pair of features, coloured by cluster assignment (k=2). Shows how the two clusters look across different feature views.
 #
-# **age vs balance (corr: 0.08)**
-# Clusters separate primarily along the balance axis. Financial position — not age alone — drives which segment a subscriber falls into.
-#
-# **age vs duration (corr: −0.04)**
-# Younger subscribers tend to have longer call durations. Agents should budget more time when targeting younger segments.
-#
-# **day vs campaign (corr: 0.17)**
-# The strongest correlation. Subscribers contacted later in the month required more campaign attempts — earlier-month contacts are higher-quality leads.
-#
-# **Row 2**
-#
-# **age vs campaign (corr: 0.02)**
-# Negligible correlation. Campaign contact count is not tied to age — both young and old subscribers can require multiple contacts.
-#
-# **day vs duration (corr: −0.03)**
-# Negligible correlation. Call duration is unaffected by which day of the month the contact was made.
-#
-# **balance vs duration (corr: 0.17)**
-# Subscribers with higher balances tend to have slightly longer calls, suggesting more thorough conversations with financially engaged customers.
+# **Two key correlations to note:**
+# - **day vs campaign (corr: 0.17)** — strongest pair. Subscribers contacted later in the month tended to need more call attempts.
+# - **balance vs duration (corr: 0.17)** — higher-balance subscribers had slightly longer calls. All other pairs are near zero (< 0.10).
 #
 # ---
 #
-# ### Plot 6 — Elbow Method (WCSS, k=1 to k=19)
+# ### Plot 6 — Elbow Method (k=1 to k=19)
 #
-# **What it shows:** Within-Cluster Sum of Squares (WCSS) for k=1 to 19. The elbow — where the rate of decrease sharply slows — indicates the optimal number of clusters.
+# **What is WCSS?** Within-Cluster Sum of Squares — measures how tightly packed each cluster is. For each subscriber, calculate the distance to their cluster's centre, square it, and sum all of them. A lower total = more compact clusters.
 #
-# **Conclusion:** The elbow occurs at **k=2**. The WCSS curve flattens significantly after k=2, meaning additional clusters reduce inertia only marginally while increasing model complexity and reducing interpretability.
+# **How to read the curve:**
+# - At k=1 (everyone in one group), WCSS is very high — the single centre is far from most points.
+# - Each extra cluster brings the centre closer to its points, so WCSS always drops.
+# - But the drops get smaller and smaller. The "elbow" is where the curve bends — where adding one more cluster stops giving a meaningful improvement.
+# - A **red dashed line** and annotation mark the detected elbow automatically on the plot.
+#
+# **Conclusion:** The elbow appears at the marked k. Beyond that point the WCSS curve flattens.
 #
 # ---
 #
 # ### Plot 7 — Feature Correlation Graph
 #
-# **What it shows:** A network graph where nodes are the 5 numerical features and edges represent pairwise correlations. Edge thickness scales with absolute correlation value. Green = positive correlation; red dashed = negative correlation.
+# **What it shows:** A network diagram — circles = features, lines = pairwise correlations. Thicker line = stronger correlation. Green = positive. Red dashed = negative.
 #
-# **Conclusion:** `campaign vs day` (0.17) and `balance vs duration` (implicitly 0.17) are the strongest relationships — the thickest green edges. Most other correlations are weak (< 0.10), confirming the 5 features are largely independent. This independence benefits KMeans, as correlated features would bias the Euclidean distance metric and distort cluster shapes.
+# **Key takeaway:** Only one pair stands out:
+# - **campaign ↔ day (+0.17):** Subscribers contacted later in the month tended to need more call attempts. All other pairs are near zero — the 5 features are largely independent of each other.
 #
 # ---
 #
 # ### Overall Clustering Conclusion
 #
-# KMeans clustering on the 2,896 confirmed subscribers reveals **two distinct behavioural segments**:
+# KMeans on the 2,896 confirmed subscribers reveals **two behavioural segments**, confirmed by both silhouette score (peaks at k=2) and the elbow method (bend at k=2):
 #
-# | Segment | Profile | Campaign Strategy |
+# | Segment | Profile | Strategy |
 # |---|---|---|
-# | **Cluster 0** — High-effort converters | Younger, lower balance, longer calls, more contacts, contacted later in month | Allow more agent time; prioritise early-month contact attempts |
-# | **Cluster 1** — Low-effort converters | Older, higher balance, shorter calls, fewer contacts, contacted earlier in month | Prioritise in targeting; high ROI per call |
+# | **Cluster 0** | Younger, lower balance, longer calls, more contacts, later in month | Allow more agent time; target early in month |
+# | **Cluster 1** | Older, higher balance, shorter calls, fewer contacts, earlier in month | Prioritise in targeting — high ROI per call |
 #
-# These segments only emerge after DuckDB filtering to `y = 'yes'` — they are invisible in the full imbalanced dataset. The bank should develop **differentiated contact strategies** for each segment to maximise conversion efficiency.
