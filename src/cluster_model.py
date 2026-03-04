@@ -1,12 +1,15 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-import networkx as nx
+import seaborn as sns
 from pathlib import Path
 from sklearn.cluster import KMeans
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.metrics import (recall_score, make_scorer, classification_report,
-                             confusion_matrix, ConfusionMatrixDisplay, silhouette_score)
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.metrics import silhouette_score
+import networkx as nx
+import umap
 
 
 def _savefig_or_show(fig, name, save_dir):
@@ -17,160 +20,87 @@ def _savefig_or_show(fig, name, save_dir):
     else:
         plt.show()
 
-def cluster_subscribers(df, save_dir=None):
-    # numerical columns in order: age(0), balance(1), day(2), duration(3), campaign(4)
-    df = df.select_dtypes(include=['number'])
-    # Bring all the variables to the same magnitude
+
+def cluster_subscribers(df, seed=42, save_dir=None):
+    data = df.drop(columns=['y'], errors='ignore').copy()
+
+    num_cols = data.select_dtypes(include=['number']).columns.tolist()
+    cat_cols = data.select_dtypes(include=['object']).columns.tolist()
+
+    # StandardScaler on numerical features
     scaler = StandardScaler()
-    scaled_values = scaler.fit_transform(df)
-    df = pd.DataFrame(scaled_values, columns=df.columns, index=df.index)
+    X_num = scaler.fit_transform(data[num_cols])
 
-    X = np.array(df)
+    # OneHotEncoder on categorical features (no false ordinal relationships by label encoding)
+    ohe = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+    X_cat = ohe.fit_transform(data[cat_cols])
 
-    # Combined figure: 2D pairs (top 2 rows) + 3D triplets (bottom 2 rows)
-    # column order: age(0), balance(1), day(2), duration(3), campaign(4)
-    pairs = [
-        (0, 1, 'age',      'balance'),
-        (0, 3, 'age',      'duration'),
-        (0, 4, 'age',      'campaign'),
-        (3, 4, 'duration', 'campaign'),
-        (4, 2, 'campaign', 'day'),
-        (3, 2, 'duration', 'day'),
-    ]
-    triplets = [
-        (0, 1, 3, 'age',      'balance',  'duration'),
-        (1, 3, 4, 'balance',  'duration', 'campaign'),
-        (0, 3, 4, 'age',      'duration', 'campaign'),
-        (4, 2, 3, 'campaign', 'day',      'duration'),
-        (0, 4, 2, 'age',      'campaign', 'day'),
-    ]
-    fig = plt.figure(figsize=(18, 24))
-    fig.suptitle('Feature Scatter Plots — 2D Pairs and 3D Triplets (Standardised)', fontsize=16)
+    # X_all: scaled numericals + one-hot categoricals
+    X_all = np.hstack([X_num, X_cat])
 
-    for i, (xi, yi, xlabel, ylabel) in enumerate(pairs):
-        ax = fig.add_subplot(4, 3, i + 1)
-        ax.scatter(X[:, xi], X[:, yi], s=25, alpha=0.5)
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
-        ax.set_title(f'{xlabel} vs {ylabel}')
-
-    for i, (xi, yi, zi, xlabel, ylabel, zlabel) in enumerate(triplets):
-        ax = fig.add_subplot(4, 3, 7 + i, projection='3d')
-        ax.scatter(X[:, xi], X[:, yi], X[:, zi], s=20, alpha=0.5)
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
-        ax.set_zlabel(zlabel)
-        ax.set_title(f'{xlabel}/{ylabel}/{zlabel}')
-
+    # Correlation heatmap — numerical features only
+    corr_df = pd.DataFrame(X_num, columns=num_cols).corr(method='spearman')
+    fig, ax = plt.subplots(figsize=(10, 8))
+    sns.heatmap(
+        corr_df,
+        annot=True, fmt='.2f', cmap='coolwarm', center=0,
+        linewidths=0.5, ax=ax, annot_kws={'size': 9}
+    )
+    ax.set_title('Feature Correlation (Spearman) — Numerical Features (Subscribers)', fontsize=13)
     plt.tight_layout()
-    _savefig_or_show(fig, 'scatter_pairs', save_dir)
+    _savefig_or_show(fig, 'correlation_heatmap', save_dir)
 
-    # Use all 5 numerical features for clustering: age, balance, day, duration, campaign
-    fig, axs = plt.subplots(3, 6, figsize=(30, 12))
-    fig.suptitle('KMeans Clustering Analysis: age, balance, day, duration, campaign', fontsize=20)
-    axs = axs.flatten()
+    def plot_correlation_graph(corr_df, save_dir=None):
+        feature_pairs = [
+            ('age',      'balance'),
+            ('age',      'day'),
+            ('duration', 'balance'),
+            ('campaign', 'day'),
+            ('duration', 'campaign'),
+        ]
+        edges = [(u, v, corr_df.loc[u, v]) for u, v in feature_pairs]
 
-    for k in range(2, 20):
-        model = KMeans(n_clusters=k, init='k-means++', n_init='auto')
-        cluster_labels = model.fit_predict(X)
+        G = nx.Graph()
+        for u, v, w in edges:
+            G.add_edge(u, v, weight=w)
 
-        axs[k-2].scatter(X[:, 2], X[:, 4], c=cluster_labels, s=50, cmap='viridis')
-        axs[k-2].set_title(f'k={k}')
-        axs[k-2].set_xlabel('day')
-        axs[k-2].set_ylabel('campaign')
-        centroids = model.cluster_centers_[:, [2, 4]]
-        axs[k-2].scatter(centroids[:, 0], centroids[:, 1], marker='o', c='yellow', s=200, edgecolors='black', label='Centroids')
+        pos = nx.circular_layout(G)
 
-    _savefig_or_show(fig, 'kmeans_k2_to_k20', save_dir)
+        positive_edges = [(u, v) for u, v, w in edges if w >= 0]
+        negative_edges = [(u, v) for u, v, w in edges if w < 0]
+        pos_widths = [abs(G[u][v]['weight']) * 40 for u, v in positive_edges]
+        neg_widths = [abs(G[u][v]['weight']) * 40 for u, v in negative_edges]
 
-    # Set up the subplot layout
-    fig, axs = plt.subplots(3, 6, figsize=(30, 12))
-    fig.suptitle('KMeans Clustering with Silhouette Score', fontsize=20)
-    axs = axs.flatten()
+        fig, ax = plt.subplots(figsize=(8, 7))
+        nx.draw_networkx_nodes(G, pos, node_size=2000, node_color='steelblue', ax=ax)
+        nx.draw_networkx_labels(G, pos, font_color='white', font_size=9, font_weight='bold', ax=ax)
+        nx.draw_networkx_edges(G, pos, edgelist=positive_edges, width=pos_widths,
+                               edge_color='green', ax=ax)
+        nx.draw_networkx_edges(G, pos, edgelist=negative_edges, width=neg_widths,
+                               edge_color='red', style='dashed', ax=ax)
+        edge_labels = {(u, v): f'{w:+.2f}' for u, v, w in edges}
+        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=9, ax=ax)
 
-    for k in range(2, 20):
-        model = KMeans(n_clusters=k, init='k-means++', n_init='auto')
-        cluster_labels = model.fit_predict(X)
-        score = silhouette_score(X, cluster_labels)
-        axs[k-2].scatter(X[:, 2], X[:, 4], c=cluster_labels, s=50, cmap='viridis')
-        axs[k-2].set_title(f'k={k}, Silhouette Score: {score:.4f}')
-        axs[k-2].set_xlabel('day')
-        axs[k-2].set_ylabel('campaign')
-        centroids = model.cluster_centers_[:, [2, 4]]
-        axs[k-2].scatter(centroids[:, 0], centroids[:, 1], marker='o', c='yellow', s=200, edgecolors='black', label='Centroids')
+        ax.set_title('Feature Correlation Graph', fontsize=13)
+        ax.axis('off')
+        plt.tight_layout()
+        _savefig_or_show(fig, 'correlation_graph', save_dir)
 
-    plt.tight_layout()
-    _savefig_or_show(fig, 'silhouette_scores', save_dir)
-
-    model = KMeans(n_clusters=2, init='k-means++', n_init='auto')
-    cluster_labels = model.fit_predict(X)
-
-    df1 = pd.DataFrame(df[cluster_labels == 0])
-    print(df1.describe())
-
-    df2 = pd.DataFrame(df[cluster_labels == 1])
-    print(df2.describe())
-
-    # Scatter plots for correlated feature pairs (from correlation map)
-    fig, axs = plt.subplots(2, 3, figsize=(18, 10))
-    fig.suptitle('KMeans Clustering - Correlated Feature Pairs', fontsize=16)
-    axs = axs.flatten()
-
-    # age vs balance (corr: 0.08)
-    axs[0].scatter(X[:, 0], X[:, 1], c=cluster_labels, s=50, cmap='viridis')
-    axs[0].set_title('age vs balance (corr: 0.08)')
-    axs[0].set_xlabel('age')
-    axs[0].set_ylabel('balance')
-
-    # age vs duration (corr: -0.04)
-    axs[1].scatter(X[:, 0], X[:, 3], c=cluster_labels, s=50, cmap='viridis')
-    axs[1].set_title('age vs duration (corr: -0.04)')
-    axs[1].set_xlabel('age')
-    axs[1].set_ylabel('duration')
-
-    # day vs campaign (corr: 0.17)
-    axs[2].scatter(X[:, 2], X[:, 4], c=cluster_labels, s=50, cmap='viridis')
-    axs[2].set_title('day vs campaign (corr: 0.17)')
-    axs[2].set_xlabel('day')
-    axs[2].set_ylabel('campaign')
-
-    # age vs campaign (corr: 0.02)
-    axs[3].scatter(X[:, 0], X[:, 4], c=cluster_labels, s=50, cmap='viridis')
-    axs[3].set_title('age vs campaign (corr: 0.02)')
-    axs[3].set_xlabel('age')
-    axs[3].set_ylabel('campaign')
-
-    # day vs duration (corr: -0.03)
-    axs[4].scatter(X[:, 2], X[:, 3], c=cluster_labels, s=50, cmap='viridis')
-    axs[4].set_title('day vs duration (corr: -0.03)')
-    axs[4].set_xlabel('day')
-    axs[4].set_ylabel('duration')
-
-    # balance vs duration (corr: 0.17)
-    axs[5].scatter(X[:, 1], X[:, 3], c=cluster_labels, s=50, cmap='viridis')
-    axs[5].set_title('balance vs duration (corr: 0.17)')
-    axs[5].set_xlabel('balance')
-    axs[5].set_ylabel('duration')
-
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
-    _savefig_or_show(fig, 'correlated_pairs', save_dir)
-
-    # The elbow method — find elbow automatically using largest drop in WCSS
+    plot_correlation_graph(corr_df, save_dir)
+    
+    # Elbow method — find optimal k
     wcss = []
     for k in range(1, 20):
-        kmeans = KMeans(n_clusters=k, init='k-means++', n_init='auto')
-        kmeans.fit(X)
+        kmeans = KMeans(n_clusters=k, init='k-means++', n_init='auto', random_state=seed)
+        kmeans.fit(X_all)
         wcss.append(kmeans.inertia_)
-
-    # Elbow = k where the drop from k to k+1 is smallest relative to k-1 to k
-    drops = [wcss[i] - wcss[i + 1] for i in range(len(wcss) - 1)]
-    # Second derivative: where the drop itself decreases most sharply
+    drops       = [wcss[i] - wcss[i + 1] for i in range(len(wcss) - 1)]
     second_diff = [drops[i] - drops[i + 1] for i in range(len(drops) - 1)]
-    elbow_k = second_diff.index(max(second_diff)) + 2  # +2 because k starts at 1
+    elbow_k     = second_diff.index(max(second_diff)) + 2
 
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.grid()
-    ax.plot(range(1, 20), wcss, linewidth=2, color="blue", marker="8")
+    ax.plot(range(1, 20), wcss, linewidth=2, color='steelblue', marker='o')
     ax.axvline(x=elbow_k, color='red', linestyle='--', linewidth=1.5, label=f'Elbow at k={elbow_k}')
     ax.annotate(
         f'Elbow\nk={elbow_k}',
@@ -179,7 +109,7 @@ def cluster_subscribers(df, save_dir=None):
         arrowprops=dict(arrowstyle='->', color='red'),
         color='red', fontsize=11, fontweight='bold'
     )
-    ax.set_title('Elbow Method — Optimal Number of Clusters', fontsize=13)
+    ax.set_title('Elbow Method — All Features', fontsize=13)
     ax.set_xlabel('K (number of clusters)')
     ax.set_xticks(range(1, 20))
     ax.set_ylabel('WCSS (Within-Cluster Sum of Squares)')
@@ -187,69 +117,116 @@ def cluster_subscribers(df, save_dir=None):
     plt.tight_layout()
     _savefig_or_show(fig, 'elbow_method', save_dir)
     print(f"Elbow detected at k={elbow_k}")
-    print(wcss)
+    
+    # Silhouette scores - find optimal k
+    silhouette_scores = []
+    for k in range(2, 20):
+        labels = KMeans(n_clusters=k, init='k-means++', n_init='auto', random_state=seed).fit_predict(X_all)
+        silhouette_scores.append(silhouette_score(X_all, labels))
 
-    plot_correlation_graph(save_dir)
+    silhouet_k = silhouette_scores.index(max(silhouette_scores)) + 2
 
-
-def plot_3d_scatter(X, cluster_labels, save_dir=None):
-    # column order: age(0), balance(1), day(2), duration(3), campaign(4)
-    # 4 most meaningful triplets based on feature importance and correlations
-    triplets = [
-        (0, 1, 3, 'age',      'balance',  'duration'),
-        (1, 3, 4, 'balance',  'duration', 'campaign'),
-        (0, 3, 4, 'age',      'duration', 'campaign'),
-        (4, 2, 3, 'campaign', 'day',      'duration'),
-        (0, 4, 2, 'age',      'campaign', 'day'),
-    ]
-    fig = plt.figure(figsize=(16, 12))
-    fig.suptitle('3D Scatter Plots — Most Meaningful Feature Triplets (k=2)', fontsize=15)
-
-    for i, (xi, yi, zi, xlabel, ylabel, zlabel) in enumerate(triplets):
-        ax = fig.add_subplot(2, 2, i + 1, projection='3d')
-        ax.scatter(X[:, xi], X[:, yi], X[:, zi],
-                   c=cluster_labels, s=20, cmap='viridis', alpha=0.6)
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
-        ax.set_zlabel(zlabel)
-        ax.set_title(f'{xlabel} / {ylabel} / {zlabel}')
-
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(range(2, 20), silhouette_scores, marker='o', linewidth=2, color='steelblue')
+    ax.axvline(x=silhouet_k, color='red', linestyle='--', linewidth=1.5, label=f'Best k={silhouet_k}')
+    ax.set_title('Silhouette Score by K — All Features')
+    ax.set_xlabel('K'); ax.set_ylabel('Silhouette Score')
+    ax.set_xticks(range(2, 20))
+    ax.grid(True)
+    ax.legend()
     plt.tight_layout()
-    _savefig_or_show(fig, '3d_scatter', save_dir)
+    _savefig_or_show(fig, 'silhouette_scores', save_dir)
+    print(f"Highest silhouette scores at k={silhouet_k}")
+    
+    best_k = 2
+    
+    # DR reduces X_all to 2 and 3 components — KMeans then clusters those reduced features
+    k_values     = [best_k, 2, 3]
+    method_names = ['PCA', 'tSNE', 'UMAP']
 
+    reducers_2d = {
+        'PCA':  PCA(n_components=2).fit_transform(X_all),
+        'tSNE': TSNE(n_components=2, random_state=seed, perplexity=30).fit_transform(X_all),
+        'UMAP': umap.UMAP(n_components=2, random_state=seed).fit_transform(X_all),
+    }
+    reducers_3d = {
+        'PCA':  PCA(n_components=3).fit_transform(X_all),
+        'tSNE': TSNE(n_components=3, random_state=seed, perplexity=30).fit_transform(X_all),
+        'UMAP': umap.UMAP(n_components=3, random_state=seed).fit_transform(X_all),
+    }
 
-def plot_correlation_graph(save_dir=None):
-    edges = [
-        ('age',      'balance',  0.08),
-        ('age',      'duration', -0.04),
-        ('age',      'campaign',  0.02),
-        ('duration', 'campaign', -0.09),
-        ('campaign', 'day',       0.17),
-        ('duration', 'day',      -0.03),
-    ]
+    # 2×3 grid — best_k clusters on 2-component (row 1) and 3-component (row 2)
+    fig = plt.figure(figsize=(18, 10))
+    fig.suptitle(f'best_k={best_k} — Clustered on 2 Features (row 1) and 3 Features (row 2)', fontsize=14)
+    for col, name in enumerate(method_names):
+        X2     = reducers_2d[name]
+        lbl2   = KMeans(n_clusters=best_k, init='k-means++', n_init='auto', random_state=seed).fit_predict(X2)
+        score2 = silhouette_score(X2, lbl2)
+        ax2    = fig.add_subplot(2, 3, col + 1)
+        ax2.scatter(X2[:, 0], X2[:, 1], c=lbl2, cmap='viridis', s=15, alpha=0.7)
+        ax2.set_title(f'{name} 2 features  |  silhouette={score2:.3f}')
+        ax2.set_xlabel(f'{name} 1')
+        ax2.set_ylabel(f'{name} 2')
 
-    G = nx.Graph()
-    for u, v, w in edges:
-        G.add_edge(u, v, weight=w)
-
-    pos = nx.circular_layout(G)
-
-    positive_edges = [(u, v) for u, v, w in edges if w >= 0]
-    negative_edges = [(u, v) for u, v, w in edges if w < 0]
-    pos_widths = [abs(G[u][v]['weight']) * 40 for u, v in positive_edges]
-    neg_widths = [abs(G[u][v]['weight']) * 40 for u, v in negative_edges]
-
-    fig, ax = plt.subplots(figsize=(8, 7))
-    nx.draw_networkx_nodes(G, pos, node_size=2000, node_color='steelblue', ax=ax)
-    nx.draw_networkx_labels(G, pos, font_color='white', font_size=9, font_weight='bold', ax=ax)
-    nx.draw_networkx_edges(G, pos, edgelist=positive_edges, width=pos_widths,
-                           edge_color='green', ax=ax)
-    nx.draw_networkx_edges(G, pos, edgelist=negative_edges, width=neg_widths,
-                           edge_color='red', style='dashed', ax=ax)
-    edge_labels = {(u, v): f'{w:+.2f}' for u, v, w in edges}
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=9, ax=ax)
-
-    ax.set_title('Feature Correlation Graph', fontsize=13)
-    ax.axis('off')
+        X3     = reducers_3d[name]
+        lbl3   = KMeans(n_clusters=best_k, init='k-means++', n_init='auto', random_state=seed).fit_predict(X3)
+        score3 = silhouette_score(X3, lbl3)
+        ax3    = fig.add_subplot(2, 3, col + 4, projection='3d')
+        ax3.scatter(X3[:, 0], X3[:, 1], X3[:, 2], c=lbl3, cmap='viridis', s=10, alpha=0.6)
+        ax3.set_title(f'{name} 3 features  |  silhouette={score3:.3f}')
+        ax3.set_xlabel(f'{name} 1')
+        ax3.set_ylabel(f'{name} 2')
+        ax3.set_zlabel(f'{name} 3')
     plt.tight_layout()
-    _savefig_or_show(fig, 'correlation_graph', save_dir)
+    _savefig_or_show(fig, 'dr_clustering_2d3d', save_dir)
+
+    # Cluster profiling — UMAP 2-component labels with best_k
+    umap_2d      = reducers_2d['UMAP']
+    profile_lbl  = KMeans(n_clusters=best_k, init='k-means++', n_init='auto', random_state=seed).fit_predict(umap_2d)
+    profiled     = data.copy()
+    profiled['cluster'] = profile_lbl
+    profiled['cluster'] = profiled['cluster'].map({0: 'Cluster 0', 1: 'Cluster 1'})
+    colors = ['#4e9fc4', '#f4a261']
+
+    # Plot 1 — Numerical means per cluster (simple bar chart)
+    means = profiled.groupby('cluster')[num_cols].mean()
+    fig, ax = plt.subplots(figsize=(10, 5))
+    means.T.plot(kind='bar', ax=ax, color=colors, edgecolor='white', width=0.6)
+    ax.set_title('Average Value per Feature — Cluster 0 vs Cluster 1', fontsize=13)
+    ax.set_xlabel('Feature')
+    ax.set_ylabel('Mean value')
+    ax.set_xticklabels(num_cols, rotation=0)
+    ax.legend(title='')
+    ax.grid(axis='y', alpha=0.4)
+    for container in ax.containers:
+        ax.bar_label(container, fmt='%.1f', fontsize=8, padding=2)
+    plt.tight_layout()
+    _savefig_or_show(fig, 'cluster_means', save_dir)
+
+    # Plot 2 — Categorical breakdown per cluster (one subplot per feature)
+    n_cat = len(cat_cols)
+    fig, axs = plt.subplots(1, n_cat, figsize=(6 * n_cat, 5))
+    fig.suptitle('Category Breakdown per Cluster (%) — Cluster 0 vs Cluster 1', fontsize=13)
+    if n_cat == 1:
+        axs = [axs]
+    for ax, col in zip(axs, cat_cols):
+        pct = (profiled.groupby(['cluster', col])
+                       .size()
+                       .groupby(level=0)
+                       .apply(lambda s: s / s.sum() * 100)
+                       .unstack(fill_value=0))
+        pct.T.plot(kind='bar', ax=ax, color=colors, edgecolor='white', width=0.7)
+        ax.set_title(col, fontsize=11)
+        ax.set_ylabel('% of cluster')
+        ax.set_xlabel('')
+        ax.tick_params(axis='x', rotation=45)
+        ax.legend(title='')
+        ax.grid(axis='y', alpha=0.4)
+    plt.tight_layout()
+    _savefig_or_show(fig, 'cluster_categories', save_dir)
+
+    # Summary
+    print("\n Cluster sizes")
+    print(profiled['cluster'].value_counts().to_string())
+    print("\nNumerical means per cluster ")
+    print(means.round(1).to_string())

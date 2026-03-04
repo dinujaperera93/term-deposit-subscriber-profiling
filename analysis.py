@@ -442,6 +442,48 @@ print(f"    Missed subscribers        : {missed_subs_test:,}  (false negatives)"
 # %% [markdown]
 # ---
 # ## 10. Subscriber Segmentation — KMeans Clustering
+#
+# ### Encoding — One-Hot Encoding
+# One-Hot Encoding is used for categorical features to avoid implying a false ordinal
+# relationship between categories.
+#
+# ### Feature Selection — All Features
+# All available features are included because the full feature space gives the most complete
+# subscriber profile.
+#
+# ### Correlation — Numerical Features Only
+# Spearman correlation is used on numerical features only — Pearson is not defined
+# for categorical variables, and Spearman is more robust to the skewed distributions
+# of `balance`, `duration`, and `campaign`.
+#
+# **Insight 1:** `duration` and `campaign` have a positive correlation,
+# meaning subscribers who required more contact attempts also tended to have
+# longer calls — persistent outreach is associated with more engaged conversations.
+#
+# **Insight 2:** `age` and `balance` show a higher correlation among subscribers,
+# indicating that older subscribers tend to hold greater account balances —
+# a useful demographic signal for targeting.
+#
+# ### Elbow Method
+# The Elbow method plots WCSS (total within-cluster variance) against k; the
+# optimal k is the point where adding more clusters do not reduce the score much.
+# The annotation is placed at the k where the second difference of WCSS drops
+# is maximum — i.e. where the curve bends most sharply.
+#
+# ### Silhouette Score
+# Silhouette score measures how similar each point is to its own cluster versus
+# neighbouring clusters (range −1 to 1); it provides a second, independent
+# confirmation of the optimal k beyond the elbow method.
+#
+# ### Dimensionality Reduction
+# PCA, t-SNE, and UMAP compress all features into 2 or 3 components; KMeans
+# then clusters subscribers in that reduced space.
+#
+# ### Cluster Plots
+# The 2×3 grid shows best_k clusters specifically, comparing 2-component (2D)
+# versus 3-component (3D) reductions side by side.
+#
+# ### Cluster Interpretation
 
 # %%
 subscribers = duckdb.sql("""
@@ -452,97 +494,3 @@ subscribers = duckdb.sql("""
 
 print(f"Subscribers: {len(subscribers):,}")
 cluster_subscribers(subscribers)
-
-
-# %% [markdown]
-# ### Plot 1 — Combined 2D Pairs and 3D Triplets (Standardised)
-#
-# > **Note on axis values:** All features are **standardised (z-score)** before plotting.
-# > A value of 0 = population mean; negative = below average; positive = above average.
-# > For example, `day` ranges 1–31 (mean ≈ 15), so day=5 appears as approximately −1.3
-#
-# **What it shows:** A 4×3 figure — top 2 rows: 6 pairwise 2D scatter plots for all feature combinations; bottom 2 rows: 5 three-dimensional scatter plots (age/balance/duration, balance/duration/campaign, age/duration/campaign, campaign/day/duration, age/campaign/day). No cluster colours — raw distribution only.
-#
-# **Conclusion:** Subscribers are scattered with no obvious groupings in 2D or 3D. No single pair or triplet cleanly separates subscribers. Clustering on all 5 features together is needed to reveal hidden structure.
-#
-# ---
-#
-# ### Plot 2 — KMeans k=2 to k=19 (3×6 grid, day vs campaign axes)
-#
-# **What it shows:** Cluster assignments for k=2 to k=19. Clustering uses all 5 features. The x-axis is `day` (standardised), y-axis is `campaign` (standardised) — these two axes are chosen because campaign vs day is the highest correlation pair (0.17). Yellow circles = cluster centroids projected onto these axes.
-#
-# **Why axes go negative:** Both `day` and `campaign` are standardised. Day (mean ≈ 15) spans roughly −2 to +2. Campaign (mean ≈ 2.5) is similar. Negative simply means "below average" — not an error.
-#
-# **Conclusion:** At k=2–3, subscribers split mainly along the campaign axis — few contacts vs many follow-up calls. Beyond k=5, clusters fragment into noise.
-#
-# ---
-#
-# ### Plot 3 — Silhouette Scores (3×6 grid, k=2 to k=19)
-#
-# **What it shows:** Same layout as Plot 2. Each subplot title shows the silhouette score for that k. Silhouette ranges from −1 to 1: near 1 = tight, well-separated clusters; near 0 = overlapping clusters.
-#
-# **Conclusion:** Score peaks at **k=2**, confirming two clusters is the most statistically justified segmentation. Scores decline as k increases beyond 4.
-#
-# ---
-#
-# ### Plot 4 — Cluster Statistics (k=2, printed table — not a visual plot)
-#
-# **What it shows:** Mean, std, min, max for each feature within each of the 2 clusters. Values are in standardised units (positive = above average, negative = below average).
-#
-# **Two subscriber segments:**
-#
-# | | Cluster 0 | Cluster 1 |
-# |---|---|---|
-# | `age` | Younger (below avg) | Older (above avg) |
-# | `balance` | Lower | Higher |
-# | `duration` | Longer calls | Shorter calls |
-# | `campaign` | More contacts needed | Fewer contacts needed |
-# | `day` | Later in month | Earlier in month |
-#
-# - **Cluster 0 — High-effort converters:** Younger, lower-balance subscribers needing more campaign contacts and longer calls. Higher cost per conversion.
-# - **Cluster 1 — Low-effort converters:** Older, higher-balance subscribers converting quickly with fewer contacts. Lower cost per conversion and higher lifetime value.
-#
-# ---
-#
-# ### Plot 5 — Correlated Feature Pairs with Cluster Colours (k=2, 2×3 grid)
-#
-# **What it shows:** 6 scatter plots — each pair of features, coloured by cluster assignment (k=2). Shows how the two clusters look across different feature views.
-#
-# **Two key correlations to note:**
-# - **day vs campaign (corr: 0.17)** — strongest pair. Subscribers contacted later in the month tended to need more call attempts.
-# - **balance vs duration (corr: 0.17)** — higher-balance subscribers had slightly longer calls. All other pairs are near zero (< 0.10).
-#
-# ---
-#
-# ### Plot 6 — Elbow Method (k=1 to k=19)
-#
-# **What is WCSS?** Within-Cluster Sum of Squares — measures how tightly packed each cluster is. For each subscriber, calculate the distance to their cluster's centre, square it, and sum all of them. A lower total = more compact clusters.
-#
-# **How to read the curve:**
-# - At k=1 (everyone in one group), WCSS is very high — the single centre is far from most points.
-# - Each extra cluster brings the centre closer to its points, so WCSS always drops.
-# - But the drops get smaller and smaller. The "elbow" is where the curve bends — where adding one more cluster stops giving a meaningful improvement.
-# - A **red dashed line** and annotation mark the detected elbow automatically on the plot.
-#
-# **Conclusion:** The elbow appears at the marked k. Beyond that point the WCSS curve flattens.
-#
-# ---
-#
-# ### Plot 7 — Feature Correlation Graph
-#
-# **What it shows:** A network diagram — circles = features, lines = pairwise correlations. Thicker line = stronger correlation. Green = positive. Red dashed = negative.
-#
-# **Key takeaway:** Only one pair stands out:
-# - **campaign ↔ day (+0.17):** Subscribers contacted later in the month tended to need more call attempts. All other pairs are near zero — the 5 features are largely independent of each other.
-#
-# ---
-#
-# ### Overall Clustering Conclusion
-#
-# KMeans on the 2,896 confirmed subscribers reveals **two behavioural segments**, confirmed by both silhouette score (peaks at k=2) and the elbow method (bend at k=2):
-#
-# | Segment | Profile | Strategy |
-# |---|---|---|
-# | **Cluster 0** | Younger, lower balance, longer calls, more contacts, later in month | Allow more agent time; target early in month |
-# | **Cluster 1** | Older, higher balance, shorter calls, fewer contacts, earlier in month | Prioritise in targeting — high ROI per call |
-#

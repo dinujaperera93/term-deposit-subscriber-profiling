@@ -26,7 +26,7 @@ def main():
     """).df()
 
     print(f"Subscribers: {len(subscribers):,}")
-    cluster_subscribers(subscribers, save_dir='plots')
+    cluster_subscribers(subscribers, seed=seed, save_dir='figures_Clustering')
 
 if __name__ == "__main__":
     main()
