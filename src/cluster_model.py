@@ -10,6 +10,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.metrics import silhouette_score
 import networkx as nx
 import umap
+from config import SEED, K_MAX, TSNE_PERPLEXITY, CLUSTER_PALETTE
 
 
 def _savefig_or_show(fig, name, save_dir):
@@ -21,7 +22,7 @@ def _savefig_or_show(fig, name, save_dir):
         plt.show()
 
 
-def cluster_subscribers(df, seed=42, save_dir=None):
+def cluster_subscribers(df, seed=SEED, save_dir=None):
     data = df.drop(columns=['y'], errors='ignore').copy()
 
     num_cols = data.select_dtypes(include=['number']).columns.tolist()
@@ -87,10 +88,10 @@ def cluster_subscribers(df, seed=42, save_dir=None):
         _savefig_or_show(fig, 'correlation_graph', save_dir)
 
     plot_correlation_graph(corr_df, save_dir)
-    
+
     # Elbow method — find optimal k
     wcss = []
-    for k in range(1, 20):
+    for k in range(1, K_MAX):
         kmeans = KMeans(n_clusters=k, init='k-means++', n_init='auto', random_state=seed)
         kmeans.fit(X_all)
         wcss.append(kmeans.inertia_)
@@ -100,7 +101,7 @@ def cluster_subscribers(df, seed=42, save_dir=None):
 
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.grid()
-    ax.plot(range(1, 20), wcss, linewidth=2, color='steelblue', marker='o')
+    ax.plot(range(1, K_MAX), wcss, linewidth=2, color='steelblue', marker='o')
     ax.axvline(x=elbow_k, color='red', linestyle='--', linewidth=1.5, label=f'Elbow at k={elbow_k}')
     ax.annotate(
         f'Elbow\nk={elbow_k}',
@@ -111,47 +112,46 @@ def cluster_subscribers(df, seed=42, save_dir=None):
     )
     ax.set_title('Elbow Method — All Features', fontsize=13)
     ax.set_xlabel('K (number of clusters)')
-    ax.set_xticks(range(1, 20))
+    ax.set_xticks(range(1, K_MAX))
     ax.set_ylabel('WCSS (Within-Cluster Sum of Squares)')
     ax.legend()
     plt.tight_layout()
     _savefig_or_show(fig, 'elbow_method', save_dir)
-    print(f"Elbow detected at k={elbow_k}")
-    
+
+    best_k = elbow_k
+    print(f"Elbow detected at k={elbow_k} | Using best_k={best_k}")
+
     # Silhouette scores - find optimal k
     silhouette_scores = []
-    for k in range(2, 20):
+    for k in range(2, K_MAX):
         labels = KMeans(n_clusters=k, init='k-means++', n_init='auto', random_state=seed).fit_predict(X_all)
         silhouette_scores.append(silhouette_score(X_all, labels))
 
     silhouet_k = silhouette_scores.index(max(silhouette_scores)) + 2
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(range(2, 20), silhouette_scores, marker='o', linewidth=2, color='steelblue')
+    ax.plot(range(2, K_MAX), silhouette_scores, marker='o', linewidth=2, color='steelblue')
     ax.axvline(x=silhouet_k, color='red', linestyle='--', linewidth=1.5, label=f'Best k={silhouet_k}')
     ax.set_title('Silhouette Score by K — All Features')
     ax.set_xlabel('K'); ax.set_ylabel('Silhouette Score')
-    ax.set_xticks(range(2, 20))
+    ax.set_xticks(range(2, K_MAX))
     ax.grid(True)
     ax.legend()
     plt.tight_layout()
     _savefig_or_show(fig, 'silhouette_scores', save_dir)
-    print(f"Highest silhouette scores at k={silhouet_k}")
-    
-    best_k = 2
-    
+    print(f"Highest silhouette score at k={silhouet_k} | Using best_k={best_k} (elbow)")
+
     # DR reduces X_all to 2 and 3 components — KMeans then clusters those reduced features
-    k_values     = [best_k, 2, 3]
     method_names = ['PCA', 'tSNE', 'UMAP']
 
     reducers_2d = {
         'PCA':  PCA(n_components=2).fit_transform(X_all),
-        'tSNE': TSNE(n_components=2, random_state=seed, perplexity=30).fit_transform(X_all),
+        'tSNE': TSNE(n_components=2, random_state=seed, perplexity=TSNE_PERPLEXITY).fit_transform(X_all),
         'UMAP': umap.UMAP(n_components=2, random_state=seed).fit_transform(X_all),
     }
     reducers_3d = {
         'PCA':  PCA(n_components=3).fit_transform(X_all),
-        'tSNE': TSNE(n_components=3, random_state=seed, perplexity=30).fit_transform(X_all),
+        'tSNE': TSNE(n_components=3, random_state=seed, perplexity=TSNE_PERPLEXITY).fit_transform(X_all),
         'UMAP': umap.UMAP(n_components=3, random_state=seed).fit_transform(X_all),
     }
 
@@ -180,33 +180,35 @@ def cluster_subscribers(df, seed=42, save_dir=None):
     plt.tight_layout()
     _savefig_or_show(fig, 'dr_clustering_2d3d', save_dir)
 
-    # Cluster profiling — UMAP 2-component labels with best_k
-    umap_2d      = reducers_2d['UMAP']
-    profile_lbl  = KMeans(n_clusters=best_k, init='k-means++', n_init='auto', random_state=seed).fit_predict(umap_2d)
+    # Cluster profiling — cluster on full feature space (X_all) with best_k
+    # (UMAP 2D is lossy; clustering on it can collapse to fewer effective groups)
+    profile_lbl  = KMeans(n_clusters=best_k, init='k-means++', n_init='auto', random_state=seed).fit_predict(X_all)
+    print(f"Profile cluster label counts: {pd.Series(profile_lbl).value_counts().sort_index().to_dict()}")
     profiled     = data.copy()
     profiled['cluster'] = profile_lbl
-    profiled['cluster'] = profiled['cluster'].map({0: 'Cluster 0', 1: 'Cluster 1'})
-    colors = ['#4e9fc4', '#f4a261']
+    profiled['cluster'] = profiled['cluster'].map({i: f'Cluster {i}' for i in range(best_k)})
+    colors    = CLUSTER_PALETTE[:best_k]
+    color_map = {f'Cluster {i}': colors[i] for i in range(best_k)}
 
     # Plot 1 — Numerical means per cluster (simple bar chart)
     means = profiled.groupby('cluster')[num_cols].mean()
-    fig, ax = plt.subplots(figsize=(10, 5))
-    means.T.plot(kind='bar', ax=ax, color=colors, edgecolor='white', width=0.6)
-    ax.set_title('Average Value per Feature — Cluster 0 vs Cluster 1', fontsize=13)
+    fig, ax = plt.subplots(figsize=(12, 5))
+    means.T.plot(kind='bar', ax=ax, color=color_map, edgecolor='white', width=0.6)
+    ax.set_title(f'Average Value per Feature — {best_k} Clusters', fontsize=13)
     ax.set_xlabel('Feature')
     ax.set_ylabel('Mean value')
     ax.set_xticklabels(num_cols, rotation=0)
-    ax.legend(title='')
+    ax.legend(title='Cluster')
     ax.grid(axis='y', alpha=0.4)
     for container in ax.containers:
-        ax.bar_label(container, fmt='%.1f', fontsize=8, padding=2)
+        ax.bar_label(container, fmt='%.1f', fontsize=7, padding=2)
     plt.tight_layout()
     _savefig_or_show(fig, 'cluster_means', save_dir)
 
     # Plot 2 — Categorical breakdown per cluster (one subplot per feature)
     n_cat = len(cat_cols)
     fig, axs = plt.subplots(1, n_cat, figsize=(6 * n_cat, 5))
-    fig.suptitle('Category Breakdown per Cluster (%) — Cluster 0 vs Cluster 1', fontsize=13)
+    fig.suptitle(f'Category Breakdown per Cluster (%) — {best_k} Clusters', fontsize=13)
     if n_cat == 1:
         axs = [axs]
     for ax, col in zip(axs, cat_cols):
@@ -220,13 +222,49 @@ def cluster_subscribers(df, seed=42, save_dir=None):
         ax.set_ylabel('% of cluster')
         ax.set_xlabel('')
         ax.tick_params(axis='x', rotation=45)
-        ax.legend(title='')
+        ax.legend(title='Cluster')
         ax.grid(axis='y', alpha=0.4)
     plt.tight_layout()
     _savefig_or_show(fig, 'cluster_categories', save_dir)
+
+    # Plot 3 — Cluster interpretation: z-score heatmap of numerical means
+    means_z = (means - means.mean()) / means.std()
+    fig, ax = plt.subplots(figsize=(max(8, len(num_cols) * 1.2), 5))
+    sns.heatmap(
+        means_z,
+        annot=means.round(1),
+        fmt='.1f',
+        cmap='RdYlGn',
+        center=0,
+        linewidths=0.5,
+        ax=ax,
+        annot_kws={'size': 9},
+        cbar_kws={'label': 'Z-score (relative to overall mean)'},
+    )
+    ax.set_title(f'Cluster Interpretation — Numerical Feature Z-scores (k={best_k})', fontsize=13)
+    ax.set_xlabel('Feature')
+    ax.set_ylabel('Cluster')
+    ax.tick_params(axis='x', rotation=30)
+    ax.tick_params(axis='y', rotation=0)
+    plt.tight_layout()
+    _savefig_or_show(fig, 'cluster_interpretation_heatmap', save_dir)
+
+    # Plot 4 — Cluster size distribution
+    size_counts = profiled['cluster'].value_counts().sort_index()
+    fig, ax = plt.subplots(figsize=(8, 4))
+    bars = ax.bar(size_counts.index, size_counts.values, color=colors[:best_k], edgecolor='white', width=0.6)
+    ax.bar_label(bars, fmt='%d', fontsize=10, padding=3)
+    ax.set_title(f'Cluster Size Distribution (k={best_k})', fontsize=13)
+    ax.set_xlabel('Cluster')
+    ax.set_ylabel('Number of samples')
+    ax.grid(axis='y', alpha=0.4)
+    plt.tight_layout()
+    _savefig_or_show(fig, 'cluster_size_distribution', save_dir)
 
     # Summary
     print("\n Cluster sizes")
     print(profiled['cluster'].value_counts().to_string())
     print("\nNumerical means per cluster ")
     print(means.round(1).to_string())
+    print("\nZ-score normalized means (cluster interpretation)")
+    print(means_z.round(2).to_string())

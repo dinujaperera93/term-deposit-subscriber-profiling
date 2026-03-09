@@ -55,9 +55,9 @@
 import warnings
 warnings.filterwarnings("ignore")
 from pathlib import Path
-import random
 import duckdb
 
+from config import SEED, DATA_FILE, CAMPAIGN_SIZE
 from src.cluster_model import cluster_subscribers
 from src.two_layer_model import (
     load_data, get_feature_sets, explore_data,
@@ -66,11 +66,10 @@ from src.two_layer_model import (
     feature_importance, evaluate_model
 )
 
-SEED = random.randint(1000, 9999)
 print(f"Seed: {SEED}")
 
 ROOT = Path.cwd()
-DATA_PATH = ROOT / "data" / "term-deposit-marketing-2020.csv"
+DATA_PATH = ROOT / DATA_FILE
 
 # %% [markdown]
 # ---
@@ -400,24 +399,19 @@ print(feat2.to_string(index=False))
 # ### Business Impact
 
 # %%
-CAMPAIGN_SIZE = 40_000
-
-# Model 1 confusion matrix: rows = actual, cols = predicted
-# [TN, FP]   --> actual Do Not Call
-# [FN, TP]   --> actual Call (subscriber)
 tn1, fp1, fn1, tp1 = cm1.ravel()
 total1 = tn1 + fp1 + fn1 + tp1
 
-predicted_no_call   = tn1 + fn1          # model says "Do Not Call"
-predicted_call      = tp1 + fp1          # model says "Call"
+predicted_no_call   = tn1 + fn1
+predicted_call      = tp1 + fp1
 pct_saved           = predicted_no_call / total1
 
 calls_saved         = int(pct_saved * CAMPAIGN_SIZE)
-useless_calls_test  = fp1                # called but won't subscribe
-missed_subs_test    = fn1               # missed subscribers
-correct_calls_test  = tp1              # correctly targeted
+useless_calls_test  = fp1
+missed_subs_test    = fn1
+correct_calls_test  = tp1
 
-avg_duration_sec     = X_train['duration'].mean()           # avg call duration from train only
+avg_duration_sec     = X_train['duration'].mean()
 avg_duration_min     = avg_duration_sec / 60
 hours_saved_test     = predicted_no_call * avg_duration_sec / 3600
 hours_saved_campaign = calls_saved * avg_duration_sec / 3600
@@ -466,9 +460,10 @@ print(f"    Missed subscribers        : {missed_subs_test:,}  (false negatives)"
 #
 # ### Elbow Method
 # The Elbow method plots WCSS (total within-cluster variance) against k; the
-# optimal k is the point where adding more clusters do not reduce the score much.
+# optimal k is the point where adding more clusters does not reduce the score much.
 # The annotation is placed at the k where the second difference of WCSS drops
-# is maximum — i.e. where the curve bends most sharply.
+# is maximum — i.e. where the curve bends most sharply. `best_k` is automatically
+# set to this elbow value.
 #
 # ### Silhouette Score
 # Silhouette score measures how similar each point is to its own cluster versus
@@ -480,10 +475,10 @@ print(f"    Missed subscribers        : {missed_subs_test:,}  (false negatives)"
 # then clusters subscribers in that reduced space.
 #
 # ### Cluster Plots
-# The 2×3 grid shows best_k clusters specifically, comparing 2-component (2D)
-# versus 3-component (3D) reductions side by side.
+# The 2×3 grid shows `best_k` clusters (set dynamically by the elbow method),
+# comparing 2-component (2D) versus 3-component (3D) reductions side by side.
 #
-# ### Cluster Interpretation
+
 
 # %%
 subscribers = duckdb.sql("""
@@ -493,4 +488,137 @@ subscribers = duckdb.sql("""
 """).df()
 
 print(f"Subscribers: {len(subscribers):,}")
-cluster_subscribers(subscribers)
+cluster_subscribers(subscribers, seed=SEED)
+
+# %% [markdown]
+# ### Cluster Interpretation
+#
+# KMeans with k=6 partitions the 2,896 confirmed subscribers into six behaviorally
+# distinct segments. Interpretation draws on three sources of evidence: the **cluster
+# size distribution**, the **z-score heatmap** (deviation from the overall subscriber
+# mean on each numerical feature), and the **categorical breakdown bar charts**.
+#
+# ---
+#
+# #### Cluster 0 — Young Moderate Subscribers (n = 779, 26.9%)
+#
+# **Characteristics:**
+# - Young customers (average age ≈ 33)
+# - Lower account balances (≈ €893)
+# - Moderate call duration (≈ 568 s)
+# - Few campaign contacts (2.0)
+# - Contacted early in the month (day ≈ 8)
+#
+# **Interpretation:**
+# Cluster 0 represents younger customers with smaller balances who subscribe after
+# typical campaign interactions.
+#
+# **Business implication:**
+# Respond well to standard marketing campaigns.
+#
+# ---
+#
+# #### Cluster 1 — Highly Engaged Subscribers (n = 561, 19.4%)
+#
+# **Characteristics:**
+# - Moderate age (≈ 39)
+# - Very long call duration (≈ 1,257 seconds)
+# - Moderate balances (≈ €1,082)
+# - Average campaign attempts (2.4)
+#
+# **Interpretation:**
+# Cluster 1 consists of customers who require longer conversations before making a
+# subscription decision.
+#
+# **Business implication:**
+# Sales agents should focus on detailed product explanations.
+#
+# ---
+#
+# #### Cluster 2 — Affluent Subscribers (n = 100, 3.5%)
+#
+# **Characteristics:**
+# - Extremely high balances (≈ €12,796)
+# - Average call duration (≈ 609 s)
+# - Moderate age (≈ 43)
+# - Few campaign contacts (2.2)
+#
+# **Interpretation:**
+# Cluster 2 represents high-net-worth customers who subscribe despite relatively
+# short interactions.
+#
+# **Business implication:**
+# Potential target for premium financial products.
+#
+# ---
+#
+# #### Cluster 3 — Persistence-Driven Subscribers (n = 159, 5.5%)
+#
+# **Characteristics:**
+# - Highest number of campaign contacts (≈ 9.5)
+# - Moderate balances (≈ €1,277)
+# - Moderate age (≈ 40)
+# - Medium call duration (≈ 788 s)
+#
+# **Interpretation:**
+# Cluster 3 includes customers who require repeated marketing attempts before
+# subscribing.
+#
+# **Business implication:**
+# Follow-up campaigns are important for this segment.
+#
+# ---
+#
+# #### Cluster 4 — Older Subscribers (n = 599, 20.7%)
+#
+# **Characteristics:**
+# - Oldest age group (≈ 55)
+# - Moderate balances (≈ €1,571)
+# - Shorter call durations (≈ 529 s)
+# - Few campaign contacts (1.9)
+#
+# **Interpretation:**
+# Cluster 4 consists of older customers who tend to subscribe with minimal
+# persuasion.
+#
+# **Business implication:**
+# Likely interested in stable savings products.
+#
+# ---
+#
+# #### Cluster 5 — Late-Month Young Subscribers (n = 698, 24.1%)
+#
+# **Characteristics:**
+# - Younger customers (≈ 34)
+# - Lower call duration (≈ 469 s)
+# - Campaign contacts occur later in the month (day ≈ 24)
+# - Moderate balances (≈ €1,252)
+# - Fewest campaign contacts of any cluster (1.7)
+#
+# **Interpretation:**
+# Cluster 5 contains younger customers who respond quickly to marketing calls made
+# later in the campaign cycle.
+#
+# **Business implication:**
+# Timing of contact may influence conversion.
+#
+# ---
+#
+# #### Overall Business Conclusions
+#
+# From the clustering results, several key insights emerge:
+#
+# - Subscriber behavior is heterogeneous, forming six meaningful segments.
+# - Different segments subscribe for different reasons, including financial capacity,
+#   marketing persistence, demographic factors, and call engagement.
+# - A small group of high-balance customers forms a particularly valuable segment.
+# - Some customers respond quickly, while others require multiple marketing contacts.
+# - Marketing strategies should therefore be tailored to each subscriber segment
+#   rather than applying a single campaign strategy.
+#
+# **Final Summary:**
+# The clustering analysis identifies six distinct subscriber segments characterised by
+# differences in age, financial balance, call engagement, and marketing exposure.
+# These insights suggest that targeted marketing strategies tailored to specific
+# customer segments could significantly improve term deposit campaign efficiency
+# and conversion rates.
