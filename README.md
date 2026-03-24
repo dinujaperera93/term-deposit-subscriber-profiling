@@ -141,6 +141,30 @@ Exploratory analysis was conducted to understand:
 
 The analysis revealed a strong **class imbalance**, meaning that far fewer customers subscribe compared to those who do not.
 
+### Target Distribution
+
+![Target Distribution](figures/target_distribution.png)
+
+### Numerical Feature Distributions
+
+![Age Distribution](figures/hist_age.png)
+![Balance Distribution](figures/hist_balance.png)
+![Duration Distribution](figures/hist_duration.png)
+![Campaign Distribution](figures/hist_campaign.png)
+![Day Distribution](figures/hist_day.png)
+
+### Categorical Feature Distributions
+
+![Job](figures/feature_job.png)
+![Marital](figures/feature_marital.png)
+![Education](figures/feature_education.png)
+![Contact](figures/feature_contact.png)
+![Month](figures/feature_month.png)
+
+### Correlation Heatmap
+
+![Correlation Heatmap](figures/corr_heatmap.png)
+
 ---
 
 ## 3. Data Preprocessing
@@ -221,6 +245,14 @@ Several modelling approaches were explored and compared.
 - **Final model**
   - **LightGBM**, chosen for its strong performance on imbalanced datasets and ability to capture nonlinear relationships.
 
+### Model Comparison
+
+![Model Comparison](figures/model_comparison.png)
+
+### Feature Importance
+
+![Feature Importance](figures/feature_importance.png)
+
 ---
 
 ## 6. Model Evaluation
@@ -236,6 +268,14 @@ Evaluation focuses on metrics that are meaningful for marketing campaigns.
 - Confusion Matrix
 
 Because the dataset is imbalanced, **recall for actual subscribers** is particularly important. Missing potential subscribers could reduce campaign effectiveness.
+
+### Model 1 — Confusion Matrix (Pre-call Targeting)
+
+![Confusion Matrix Model 1](figures/confusion_matrix_Model1.png)
+
+### Model 2 — Confusion Matrix (Post-call Follow-up)
+
+![Confusion Matrix Model 2](figures/confusion_matrix_Model2.png)
 
 ---
 
@@ -260,6 +300,20 @@ Identify different types of customers who subscribe to term deposits.
 6. Perform clustering using **KMeans** on the full feature space
 7. Analyze cluster characteristics via z-score heatmap and categorical breakdown charts
 
+### Subscriber Feature Correlation
+
+![Correlation Heatmap](figures_Clustering/correlation_heatmap.png)
+![Correlation Graph](figures_Clustering/correlation_graph.png)
+
+### Optimal k Selection
+
+![Elbow Method](figures_Clustering/elbow_method.png)
+![Silhouette Scores](figures_Clustering/silhouette_scores.png)
+
+### Cluster Visualisation (PCA · t-SNE · UMAP)
+
+![Dimensionality Reduction Clustering](figures_Clustering/dr_clustering_2d3d.png)
+
 ---
 
 ### Cluster Profiles
@@ -268,6 +322,22 @@ KMeans with k=6 partitions the 2,896 confirmed subscribers into six behaviorally
 distinct segments. Interpretation draws on three sources of evidence: the **cluster
 size distribution**, the **z-score heatmap** (deviation from the overall subscriber
 mean on each numerical feature), and the **categorical breakdown bar charts**.
+
+### Cluster Size Distribution
+
+![Cluster Size Distribution](figures_Clustering/cluster_size_distribution.png)
+
+### Cluster Means
+
+![Cluster Means](figures_Clustering/cluster_means.png)
+
+### Cluster Interpretation (Z-score Heatmap)
+
+![Cluster Interpretation Heatmap](figures_Clustering/cluster_interpretation_heatmap.png)
+
+### Categorical Breakdown by Cluster
+
+![Cluster Categories](figures_Clustering/cluster_categories.png)
 
 ---
 

@@ -66,7 +66,6 @@ def cluster_subscribers(df, seed=SEED, save_dir=None):
             G.add_edge(u, v, weight=w)
 
         pos = nx.circular_layout(G)
-
         positive_edges = [(u, v) for u, v, w in edges if w >= 0]
         negative_edges = [(u, v) for u, v, w in edges if w < 0]
         pos_widths = [abs(G[u][v]['weight']) * 40 for u, v in positive_edges]
