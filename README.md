@@ -145,22 +145,6 @@ The analysis revealed a strong **class imbalance**, meaning that far fewer custo
 
 ![Target Distribution](figures/target_distribution.png)
 
-### Numerical Feature Distributions
-
-![Age Distribution](figures/hist_age.png)
-![Balance Distribution](figures/hist_balance.png)
-![Duration Distribution](figures/hist_duration.png)
-![Campaign Distribution](figures/hist_campaign.png)
-![Day Distribution](figures/hist_day.png)
-
-### Categorical Feature Distributions
-
-![Job](figures/feature_job.png)
-![Marital](figures/feature_marital.png)
-![Education](figures/feature_education.png)
-![Contact](figures/feature_contact.png)
-![Month](figures/feature_month.png)
-
 ### Correlation Heatmap
 
 ![Correlation Heatmap](figures/corr_heatmap.png)
@@ -322,24 +306,6 @@ KMeans with k=6 partitions the 2,896 confirmed subscribers into six behaviorally
 distinct segments. Interpretation draws on three sources of evidence: the **cluster
 size distribution**, the **z-score heatmap** (deviation from the overall subscriber
 mean on each numerical feature), and the **categorical breakdown bar charts**.
-
-### Cluster Size Distribution
-
-![Cluster Size Distribution](figures_Clustering/cluster_size_distribution.png)
-
-### Cluster Means
-
-![Cluster Means](figures_Clustering/cluster_means.png)
-
-### Cluster Interpretation (Z-score Heatmap)
-
-![Cluster Interpretation Heatmap](figures_Clustering/cluster_interpretation_heatmap.png)
-
-### Categorical Breakdown by Cluster
-
-![Cluster Categories](figures_Clustering/cluster_categories.png)
-
----
 
 #### Cluster 0 — Young Moderate Subscribers
 
