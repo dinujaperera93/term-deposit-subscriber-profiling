@@ -10,6 +10,7 @@ from sklearn.metrics import (recall_score, make_scorer, classification_report,
 from sklearn.neighbors import KNeighborsClassifier, NearestCentroid
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import VotingClassifier, StackingClassifier
 from lazypredict.Supervised import LazyClassifier
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials, space_eval
 
@@ -49,7 +50,7 @@ def explore_data(df):
     # Target distribution
     target_counts = df['y'].value_counts()
     
-    fig, ax = plt.subplots(figsize=(8, 5))
+    _, ax = plt.subplots(figsize=(8, 5))
     colors = ['#e74c3c','#2ecc71']
     bars = ax.bar(target_counts.index, target_counts.values, color=colors)
     for bar, count in zip(bars, target_counts.values):
@@ -231,12 +232,26 @@ def select_model(X_train_enc, X_val_enc, y_train_enc, y_val_enc):
 def compare_ensembles(X_train, y_train, seed, cv=5):
     minority_recall = make_scorer(recall_score, pos_label=1)
 
-    models = {
+    base_models = {
         "NearestCentroid": NearestCentroid(),
         "DecisionTree":    DecisionTreeClassifier(random_state=seed, class_weight='balanced'),
         "LogisticReg":     LogisticRegression(random_state=seed, class_weight='balanced', max_iter=2000),
         "KNN":             KNeighborsClassifier(n_neighbors=7),
     }
+    # NearestCentroid has no predict_proba — exclude it from stacking so all base
+    # estimators can produce probability meta-features for the final learner
+    proba_models = {k: v for k, v in base_models.items() if k != "NearestCentroid"}
+    base = [(k.lower(), v) for k, v in base_models.items()]
+    proba_base = [(k.lower(), v) for k, v in proba_models.items()]
+
+    models = dict(base_models)
+    # NearestCentroid has no predict_proba so hard voting is used to keep all four base models
+    models["Voting"] = VotingClassifier(estimators=base, voting="hard")
+    models["Stacking"] = StackingClassifier(
+        estimators=proba_base,
+        final_estimator=LogisticRegression(max_iter=2000, class_weight="balanced"),
+        cv=5,
+    )
 
     results = []
     fitted_models = {}
@@ -248,7 +263,7 @@ def compare_ensembles(X_train, y_train, seed, cv=5):
 
     results_df = pd.DataFrame(results).sort_values("Minority_Recall", ascending=False).reset_index(drop=True)
 
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(13, 5))
     ax = sns.barplot(data=results_df, x="Model", y="Minority_Recall")
     ax.bar_label(ax.containers[0], fmt='%.4f')
     plt.title("Ensemble Comparison — Minority Recall (CV)")
@@ -316,7 +331,7 @@ def feature_importance(X_train, model):
 
 
 def evaluate_model(model, X_test, y_test, le_dict, scaler, le_y,
-                   cat_cols, num_cols, cat_mode, num_bounds, cols, label=""):
+                   cat_cols, num_cols, cat_mode, num_bounds, label=""):
     # Evaluate supervised model on test set
     for col, mode_val in cat_mode.items():  # contact not in cat_mode — its "unknown" is kept
         if col in X_test.columns:
@@ -371,7 +386,7 @@ def train_two_layer_pipeline(df, seed, categorical_df, numeric_df):
     print("\nModel 1 Feature Importance:\n", feat1)
 
     report1, _ = evaluate_model(model1, X_test[pre_call_cols].copy(), y_test, le1, sc1, le_y1,
-                                pre_cat, pre_num, cat_mode, num_bounds, pre_call_cols, "Model1")
+                                pre_cat, pre_num, cat_mode, num_bounds, "Model1")
     print(f"\nModel 1 Test Performance:\n{report1}")
 
     results['model1'] = {'model': model1, 'params': params1, 'cv_score': score1,
@@ -394,7 +409,7 @@ def train_two_layer_pipeline(df, seed, categorical_df, numeric_df):
     print("\nModel 2 Feature Importance:\n", feat2)
 
     report2, _ = evaluate_model(model2, X_test[all_cols].copy(), y_test, le2, sc2, le_y2,
-                                all_cat, all_num, cat_mode, num_bounds, all_cols, "Model2")
+                                all_cat, all_num, cat_mode, num_bounds, "Model2")
     print(f"\nModel 2 Test Performance:\n{report2}")
 
     results['model2'] = {'model': model2, 'params': params2, 'cv_score': score2,

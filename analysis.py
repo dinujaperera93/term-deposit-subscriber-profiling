@@ -317,7 +317,7 @@ print(feat1)
 report1, cm1 = evaluate_model(
     model1, X_test[pre_call_cols].copy(), y_test,
     le1, sc1, le_y1,
-    pre_cat_cols, pre_num_cols, cat_mode, num_bounds, pre_call_cols, "Model1"
+    pre_cat_cols, pre_num_cols, cat_mode, num_bounds, "Model1"
 )
 print(report1)
 
@@ -374,7 +374,7 @@ print(feat2)
 report2, cm2 = evaluate_model(
     model2, X_test[all_cols].copy(), y_test,
     le2, sc2, le_y2,
-    all_cat_cols, all_num_cols, cat_mode, num_bounds, all_cols, "Model2"
+    all_cat_cols, all_num_cols, cat_mode, num_bounds, "Model2"
 )
 print(report2)
 
